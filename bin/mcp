@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# mcp - Manage MCP servers in dotfiles
+#
+# USAGE:
+#   mcp list                     List all configured MCP servers
+#   mcp add <name> <url>         Add HTTP MCP server
+#   mcp add <name> -- <cmd>      Add stdio MCP server
+#   mcp remove <name>            Remove an MCP server
+#   mcp edit                     Open mcp-servers.json in $EDITOR
+#   mcp apply                    Merge into ~/.claude.json
+#   mcp status                   Show sync status (config vs applied)
+#   mcp show <name>              Show server config as JSON
+
+set -euo pipefail
+
+MCP_FILE="${MCP_FILE:-$HOME/.claude/mcp-servers.json}"
+CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
+
+usage() {
+  sed -n '2,13p' "$0" | sed 's/^# //' | sed 's/^#//'
+  exit "${1:-0}"
+}
+
+require_jq() {
+  command -v jq &>/dev/null || { echo "Error: jq is required"; exit 1; }
+}
+
+ensure_file() {
+  [[ -f "$MCP_FILE" ]] || echo '{}' > "$MCP_FILE"
+}
+
+cmd_list() {
+  require_jq
+  ensure_file
+  echo "MCP Servers ($MCP_FILE):"
+  echo
+  jq -r 'to_entries[] | "  \(.key)\t\(.value.type // "http")\t\(.value.url // .value.command)"' "$MCP_FILE" | column -t -s $'\t'
+}
+
+cmd_show() {
+  local name="$1"
+  require_jq
+  ensure_file
+  jq -e ".\"$name\"" "$MCP_FILE" || { echo "Server '$name' not found"; exit 1; }
+}
+
+cmd_add() {
+  require_jq
+  ensure_file
+
+  local name="$1"
+  shift
+
+  if [[ "$1" == "--" ]]; then
+    shift
+    local cmd="$1"
+    shift
+    local args=("$@")
+
+    local args_json
+    args_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
+
+    jq --arg name "$name" \
+       --arg cmd "$cmd" \
+       --argjson args "$args_json" \
+       '.[$name] = {type: "stdio", command: $cmd, args: $args}' \
+       "$MCP_FILE" > "${MCP_FILE}.tmp"
+  else
+    local url="$1"
+    jq --arg name "$name" \
+       --arg url "$url" \
+       '.[$name] = {type: "http", url: $url}' \
+       "$MCP_FILE" > "${MCP_FILE}.tmp"
+  fi
+
+  mv "${MCP_FILE}.tmp" "$MCP_FILE"
+  echo "Added '$name'"
+  cmd_apply
+}
+
+cmd_remove() {
+  local name="$1"
+  require_jq
+  ensure_file
+
+  if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then
+    echo "Server '$name' not found"
+    exit 1
+  fi
+
+  jq --arg name "$name" 'del(.[$name])' "$MCP_FILE" > "${MCP_FILE}.tmp"
+  mv "${MCP_FILE}.tmp" "$MCP_FILE"
+  echo "Removed '$name'"
+  cmd_apply
+}
+
+cmd_edit() {
+  ensure_file
+  "${EDITOR:-vim}" "$MCP_FILE"
+  echo "Run 'mcp apply' to merge changes into ~/.claude.json"
+}
+
+cmd_apply() {
+  require_jq
+  ensure_file
+
+  [[ ! -f "$CLAUDE_JSON" ]] && echo '{}' > "$CLAUDE_JSON"
+
+  jq -s '.[0] * {mcpServers: .[1]}' "$CLAUDE_JSON" "$MCP_FILE" > "${CLAUDE_JSON}.tmp"
+  mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+
+  echo "Merged MCP servers into $CLAUDE_JSON"
+}
+
+cmd_status() {
+  require_jq
+  ensure_file
+
+  local config_servers applied_servers
+  config_servers=$(jq -r 'keys[]' "$MCP_FILE" 2>/dev/null | sort)
+  applied_servers=$(jq -r '.mcpServers // {} | keys[]' "$CLAUDE_JSON" 2>/dev/null | sort)
+
+  echo "Config:  $MCP_FILE"
+  echo "Applied: $CLAUDE_JSON"
+  echo
+
+  local in_sync=true
+
+  # Check each configured server
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    local config_hash applied_hash
+    config_hash=$(jq -cS ".\"$name\"" "$MCP_FILE")
+    applied_hash=$(jq -cS ".mcpServers.\"$name\" // null" "$CLAUDE_JSON")
+
+    if [[ "$config_hash" == "$applied_hash" ]]; then
+      echo "  ✓ $name"
+    elif [[ "$applied_hash" == "null" ]]; then
+      echo "  + $name (not applied)"
+      in_sync=false
+    else
+      echo "  ~ $name (differs)"
+      in_sync=false
+    fi
+  done <<< "$config_servers"
+
+  # Check for servers in applied but not in config
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then
+      echo "  - $name (not in config, only in claude.json)"
+      in_sync=false
+    fi
+  done <<< "$applied_servers"
+
+  echo
+  if $in_sync; then
+    echo "Status: in sync"
+  else
+    echo "Status: out of sync (run 'mcp apply')"
+  fi
+}
+
+case "${1:-}" in
+  list|ls)     cmd_list ;;
+  show)        cmd_show "${2:?missing server name}" ;;
+  add)         shift; cmd_add "$@" ;;
+  remove|rm)   cmd_remove "${2:?missing server name}" ;;
+  edit)        cmd_edit ;;
+  apply|sync)  cmd_apply ;;
+  status|st)   cmd_status ;;
+  -h|--help|help|"") usage ;;
+  *)           echo "Unknown command: $1"; usage 1 ;;
+esac
