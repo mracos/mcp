@@ -8,16 +8,21 @@
 #   mcp remove <name>            Remove an MCP server
 #   mcp edit                     Open mcp-servers.json in $EDITOR
 #   mcp apply                    Merge into ~/.claude.json
-#   mcp status                   Show sync status (config vs applied)
 #   mcp show <name>              Show server config as JSON
+#   mcp daemon [start|stop|status|logs]  Manage MCP proxy daemons
+#   mcp logs [name]              Tail daemon logs
+#
+# FLAGS:
+#   --no-apply                   Skip auto-apply after add/remove
 
 set -euo pipefail
 
-MCP_FILE="${MCP_FILE:-$HOME/.claude/mcp-servers.json}"
+MCP_FILE="${MCP_FILE:-$HOME/mcp-servers.json}"
 CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
+DAEMON_DIR="${DAEMON_DIR:-$HOME/.local/share/mcp}"
 
 usage() {
-  sed -n '2,13p' "$0" | sed 's/^# //' | sed 's/^#//'
+  sed -n '2,15p' "$0" | sed 's/^# //' | sed 's/^#//'
   exit "${1:-0}"
 }
 
@@ -29,12 +34,83 @@ ensure_file() {
   [[ -f "$MCP_FILE" ]] || echo '{}' > "$MCP_FILE"
 }
 
+# Get the expected config for a server (applying transformations like cmd_apply does)
+get_expected_config() {
+  local name="$1"
+  local type
+  type=$(jq -r ".\"$name\".type" "$MCP_FILE")
+
+  if [[ "$type" == "stdio-http-proxy" ]]; then
+    local port daemon_status
+    port=$(jq -r ".\"$name\".port" "$MCP_FILE")
+    daemon_status=$(get_daemon_status "$name")
+
+    if [[ "$daemon_status" == "online" ]]; then
+      jq -n --arg url "http://localhost:$port/sse" '{type: "http", url: $url}'
+    else
+      jq ".\"$name\" | {type: \"stdio\", command, args, env}" "$MCP_FILE"
+    fi
+  else
+    jq ".\"$name\"" "$MCP_FILE"
+  fi
+}
+
 cmd_list() {
   require_jq
   ensure_file
-  echo "MCP Servers ($MCP_FILE):"
-  echo
-  jq -r 'to_entries[] | "  \(.key)\t\(.value.type // "http")\t\(.value.url // .value.command)"' "$MCP_FILE" | column -t -s $'\t'
+
+  local all_synced=true
+
+  while IFS= read -r server; do
+    [[ -z "$server" ]] && continue
+
+    local type url_or_cmd info="" sync_icon="✓"
+    type=$(jq -r ".\"$server\".type // \"http\"" "$MCP_FILE")
+    url_or_cmd=$(jq -r ".\"$server\".url // .\"$server\".command" "$MCP_FILE")
+
+    # Check sync status
+    local expected_hash applied_hash
+    expected_hash=$(get_expected_config "$server" | jq -cS .)
+    applied_hash=$(jq -cS ".mcpServers.\"$server\" // null" "$CLAUDE_JSON" 2>/dev/null)
+
+    if [[ "$expected_hash" != "$applied_hash" ]]; then
+      sync_icon="~"
+      all_synced=false
+    fi
+
+    if [[ "$type" == "stdio-http-proxy" ]]; then
+      local daemon_status
+      daemon_status=$(get_daemon_status "$server")
+      case "$daemon_status" in
+        online)           info="daemon online" ;;
+        errored)          info="daemon errored"; sync_icon="!" ;;
+        stopped)          info="daemon stopped" ;;
+        "waiting restart") info="daemon failing"; sync_icon="!" ;;
+        "")               info="daemon not started" ;;
+        *)                info="daemon $daemon_status" ;;
+      esac
+    fi
+
+    if [[ -n "$info" ]]; then
+      printf "  %s %-18s %-18s %s (%s)\n" "$sync_icon" "$server" "$type" "$url_or_cmd" "$info"
+    else
+      printf "  %s %-18s %-18s %s\n" "$sync_icon" "$server" "$type" "$url_or_cmd"
+    fi
+  done < <(jq -r 'keys[]' "$MCP_FILE")
+
+  # Check for orphan servers in claude.json
+  while IFS= read -r server; do
+    [[ -z "$server" ]] && continue
+    if ! jq -e ".\"$server\"" "$MCP_FILE" >/dev/null 2>&1; then
+      printf "  - %-18s (orphan in claude.json)\n" "$server"
+      all_synced=false
+    fi
+  done < <(jq -r '.mcpServers // {} | keys[]' "$CLAUDE_JSON" 2>/dev/null)
+
+  if ! $all_synced; then
+    echo
+    echo "Run 'mcp apply' to sync"
+  fi
 }
 
 cmd_show() {
@@ -48,7 +124,20 @@ cmd_add() {
   require_jq
   ensure_file
 
-  local name="$1"
+  local no_apply=false
+  local name=""
+  local positional=()
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-apply) no_apply=true; shift ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  set -- "${positional[@]}"
+  name="$1"
   shift
 
   if [[ "$1" == "--" ]]; then
@@ -75,11 +164,23 @@ cmd_add() {
 
   mv "${MCP_FILE}.tmp" "$MCP_FILE"
   echo "Added '$name'"
-  cmd_apply
+  $no_apply || cmd_apply
 }
 
 cmd_remove() {
-  local name="$1"
+  local no_apply=false
+  local name=""
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-apply) no_apply=true; shift ;;
+      *) name="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$name" ]] && { echo "Error: missing server name"; exit 1; }
+
   require_jq
   ensure_file
 
@@ -88,10 +189,22 @@ cmd_remove() {
     exit 1
   fi
 
+  # Stop daemon if this is a stdio-http-proxy server
+  local type
+  type=$(jq -r ".\"$name\".type" "$MCP_FILE")
+  if [[ "$type" == "stdio-http-proxy" ]]; then
+    local daemon_status
+    daemon_status=$(get_daemon_status "$name")
+    if [[ -n "$daemon_status" && "$daemon_status" != "stopped" ]]; then
+      echo "Stopping daemon for '$name'..."
+      npx pm2 delete "mcp-$name" 2>/dev/null || true
+    fi
+  fi
+
   jq --arg name "$name" 'del(.[$name])' "$MCP_FILE" > "${MCP_FILE}.tmp"
   mv "${MCP_FILE}.tmp" "$MCP_FILE"
   echo "Removed '$name'"
-  cmd_apply
+  $no_apply || cmd_apply
 }
 
 cmd_edit() {
@@ -100,75 +213,206 @@ cmd_edit() {
   echo "Run 'mcp apply' to merge changes into ~/.claude.json"
 }
 
+# Generate ecosystem.config.js from mcp-servers.json
+generate_ecosystem() {
+  require_jq
+  ensure_file
+  mkdir -p "$DAEMON_DIR"
+
+  local ecosystem="$DAEMON_DIR/ecosystem.config.js"
+
+  # Start the JS file
+  echo "module.exports = {" > "$ecosystem"
+  echo "  apps: [" >> "$ecosystem"
+
+  local first=true
+  while IFS= read -r server; do
+    [[ -z "$server" ]] && continue
+
+    local type port cmd args_json env_json
+    type=$(jq -r ".\"$server\".type" "$MCP_FILE")
+
+    [[ "$type" != "stdio-http-proxy" ]] && continue
+
+    port=$(jq -r ".\"$server\".port" "$MCP_FILE")
+    cmd=$(jq -r ".\"$server\".command" "$MCP_FILE")
+    args_json=$(jq -r ".\"$server\".args | join(\" \")" "$MCP_FILE")
+
+    # Build the full command args for mcp-proxy
+    local proxy_args="mcp-proxy --port $port -- $cmd $args_json"
+
+    # Get env vars and expand ${VAR} references
+    env_json=$(jq -c ".\"$server\".env // {}" "$MCP_FILE" | envsubst)
+
+    $first || echo "," >> "$ecosystem"
+    first=false
+
+    cat >> "$ecosystem" << EOF
+    {
+      name: 'mcp-$server',
+      script: 'npx',
+      args: '$proxy_args',
+      env: $env_json,
+      max_restarts: 10,
+      min_uptime: 5000,
+      restart_delay: 1000,
+      exp_backoff_restart_delay: 500
+    }
+EOF
+  done < <(jq -r 'keys[]' "$MCP_FILE")
+
+  echo "  ]" >> "$ecosystem"
+  echo "}" >> "$ecosystem"
+
+  echo "$ecosystem"
+}
+
+# Get daemon status: online, errored, stopped, or empty if not registered
+get_daemon_status() {
+  local name="$1"
+  npx pm2 jlist 2>/dev/null | jq -r ".[] | select(.name == \"mcp-$name\") | .pm2_env.status" 2>/dev/null || echo ""
+}
+
+cmd_daemon() {
+  local subcmd="${1:-status}"
+  shift || true
+
+  case "$subcmd" in
+    start)
+      local name="${1:-}"
+      local ecosystem
+      ecosystem=$(generate_ecosystem)
+      echo "Generated $ecosystem"
+
+      if [[ -n "$name" ]]; then
+        npx pm2 start "$ecosystem" --only "mcp-$name"
+      else
+        npx pm2 start "$ecosystem"
+      fi
+      echo
+      echo "Run 'mcp apply' to update Claude config to use HTTP endpoints"
+      ;;
+    stop)
+      local name="${1:-}"
+      if [[ -n "$name" ]]; then
+        npx pm2 stop "mcp-$name"
+      else
+        npx pm2 stop all
+      fi
+      echo
+      echo "Run 'mcp apply' to update Claude config to use stdio"
+      ;;
+    status|"")
+      npx pm2 list
+      ;;
+    logs)
+      local name="${1:-}"
+      if [[ -n "$name" ]]; then
+        npx pm2 logs "mcp-$name"
+      else
+        npx pm2 logs
+      fi
+      ;;
+    *)
+      echo "Unknown daemon subcommand: $subcmd"
+      echo "Usage: mcp daemon [start|stop|status|logs] [name]"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_logs() {
+  local name="${1:-}"
+  if [[ -n "$name" ]]; then
+    npx pm2 logs "mcp-$name"
+  else
+    npx pm2 logs
+  fi
+}
+
 cmd_apply() {
   require_jq
   ensure_file
 
   [[ ! -f "$CLAUDE_JSON" ]] && echo '{}' > "$CLAUDE_JSON"
 
-  jq -s '.[0] * {mcpServers: .[1]}' "$CLAUDE_JSON" "$MCP_FILE" > "${CLAUDE_JSON}.tmp"
+  # Collect stdio-http-proxy servers that need daemon start
+  local servers_to_start=()
+  while IFS= read -r server; do
+    [[ -z "$server" ]] && continue
+    local type daemon_status
+    type=$(jq -r ".\"$server\".type" "$MCP_FILE")
+    if [[ "$type" == "stdio-http-proxy" ]]; then
+      daemon_status=$(get_daemon_status "$server")
+      if [[ -z "$daemon_status" || "$daemon_status" == "stopped" ]]; then
+        servers_to_start+=("$server")
+      fi
+    fi
+  done < <(jq -r 'keys[]' "$MCP_FILE")
+
+  # Start daemons if needed
+  if [[ ${#servers_to_start[@]} -gt 0 ]]; then
+    local ecosystem
+    ecosystem=$(generate_ecosystem)
+    for server in "${servers_to_start[@]}"; do
+      echo "Starting daemon for '$server'..."
+      npx pm2 start "$ecosystem" --only "mcp-$server" 2>/dev/null || true
+    done
+    # Give daemons a moment to start
+    sleep "${MCP_DAEMON_WAIT:-1}"
+  fi
+
+  # Build the final config, checking daemon status for stdio-http-proxy servers
+  local final_config="{}"
+  while IFS= read -r server; do
+    [[ -z "$server" ]] && continue
+
+    local type server_config
+    type=$(jq -r ".\"$server\".type" "$MCP_FILE")
+
+    if [[ "$type" == "stdio-http-proxy" ]]; then
+      local port daemon_status
+      port=$(jq -r ".\"$server\".port" "$MCP_FILE")
+      daemon_status=$(get_daemon_status "$server")
+
+      # Always use HTTP for stdio-http-proxy, let Claude show error if daemon fails
+      server_config=$(jq -n --arg url "http://localhost:$port/sse" '{type: "http", url: $url}')
+      case "$daemon_status" in
+        online)
+          echo "  $server → http://localhost:$port/sse (daemon online)" ;;
+        errored|"waiting restart")
+          echo "  $server → http://localhost:$port/sse (daemon failing)" ;;
+        stopped)
+          echo "  $server → http://localhost:$port/sse (daemon stopped)" ;;
+        *)
+          echo "  $server → http://localhost:$port/sse (daemon starting)" ;;
+      esac
+    else
+      # Pass through http and stdio types unchanged
+      server_config=$(jq ".\"$server\"" "$MCP_FILE")
+      echo "  $server → $type"
+    fi
+
+    final_config=$(echo "$final_config" | jq --arg name "$server" --argjson config "$server_config" '.[$name] = $config')
+  done < <(jq -r 'keys[]' "$MCP_FILE")
+
+  # Merge into claude.json (use + not * to fully replace mcpServers)
+  jq --argjson servers "$final_config" '. + {mcpServers: $servers}' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp"
   mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
 
+  echo
   echo "Merged MCP servers into $CLAUDE_JSON"
-}
-
-cmd_status() {
-  require_jq
-  ensure_file
-
-  local config_servers applied_servers
-  config_servers=$(jq -r 'keys[]' "$MCP_FILE" 2>/dev/null | sort)
-  applied_servers=$(jq -r '.mcpServers // {} | keys[]' "$CLAUDE_JSON" 2>/dev/null | sort)
-
-  echo "Config:  $MCP_FILE"
-  echo "Applied: $CLAUDE_JSON"
-  echo
-
-  local in_sync=true
-
-  # Check each configured server
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    local config_hash applied_hash
-    config_hash=$(jq -cS ".\"$name\"" "$MCP_FILE")
-    applied_hash=$(jq -cS ".mcpServers.\"$name\" // null" "$CLAUDE_JSON")
-
-    if [[ "$config_hash" == "$applied_hash" ]]; then
-      echo "  ✓ $name"
-    elif [[ "$applied_hash" == "null" ]]; then
-      echo "  + $name (not applied)"
-      in_sync=false
-    else
-      echo "  ~ $name (differs)"
-      in_sync=false
-    fi
-  done <<< "$config_servers"
-
-  # Check for servers in applied but not in config
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then
-      echo "  - $name (not in config, only in claude.json)"
-      in_sync=false
-    fi
-  done <<< "$applied_servers"
-
-  echo
-  if $in_sync; then
-    echo "Status: in sync"
-  else
-    echo "Status: out of sync (run 'mcp apply')"
-  fi
 }
 
 case "${1:-}" in
   list|ls)     cmd_list ;;
   show)        cmd_show "${2:?missing server name}" ;;
   add)         shift; cmd_add "$@" ;;
-  remove|rm)   cmd_remove "${2:?missing server name}" ;;
+  remove|rm)   shift; cmd_remove "$@" ;;
   edit)        cmd_edit ;;
   apply|sync)  cmd_apply ;;
-  status|st)   cmd_status ;;
+  daemon)      shift; cmd_daemon "$@" ;;
+  logs)        shift; cmd_logs "$@" ;;
   -h|--help|help|"") usage ;;
   *)           echo "Unknown command: $1"; usage 1 ;;
 esac
