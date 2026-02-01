@@ -364,7 +364,7 @@ EOF
   assert_output --partial "mcp-myproxy"
 }
 
-@test "mcp apply uses http when daemon is online" {
+@test "mcp apply uses sse when daemon is online" {
   cat > "$MCP_FILE" << 'EOF'
 {
   "myproxy": {
@@ -384,13 +384,13 @@ EOF
   assert_success
   assert_output --partial "myproxy → http://localhost:8081/sse (daemon online)"
 
-  # Should be http type in claude.json
+  # Should be sse type in claude.json
   run jq -e '.mcpServers.myproxy.type' "$HOME/.claude.json"
   assert_success
-  assert_output '"http"'
+  assert_output '"sse"'
 }
 
-@test "mcp apply always uses http for stdio-http-proxy even when daemon stopped" {
+@test "mcp apply always uses sse for stdio-http-proxy even when daemon stopped" {
   cat > "$MCP_FILE" << 'EOF'
 {
   "myproxy": {
@@ -410,10 +410,10 @@ EOF
   assert_success
   assert_output --partial "myproxy → http://localhost:8081/sse (daemon stopped)"
 
-  # Should still be http type (no fallback)
+  # Should still be sse type (no fallback)
   run jq -e '.mcpServers.myproxy.type' "$HOME/.claude.json"
   assert_success
-  assert_output '"http"'
+  assert_output '"sse"'
 }
 
 @test "mcp apply passes through http type unchanged" {
