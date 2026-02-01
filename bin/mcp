@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-MCP_FILE="${MCP_FILE:-$HOME/mcp-servers.json}"
+MCP_FILE="${MCP_FILE:-$HOME/.mcp-servers.json}"
 CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
 DAEMON_DIR="${DAEMON_DIR:-$HOME/.local/share/mcp}"
 
@@ -46,7 +46,7 @@ get_expected_config() {
     daemon_status=$(get_daemon_status "$name")
 
     if [[ "$daemon_status" == "online" ]]; then
-      jq -n --arg url "http://localhost:$port/sse" '{type: "http", url: $url}'
+      jq -n --arg url "http://localhost:$port/sse" '{type: "sse", url: $url}'
     else
       jq ".\"$name\" | {type: \"stdio\", command, args, env}" "$MCP_FILE"
     fi
@@ -376,7 +376,7 @@ cmd_apply() {
       daemon_status=$(get_daemon_status "$server")
 
       # Always use HTTP for stdio-http-proxy, let Claude show error if daemon fails
-      server_config=$(jq -n --arg url "http://localhost:$port/sse" '{type: "http", url: $url}')
+      server_config=$(jq -n --arg url "http://localhost:$port/sse" '{type: "sse", url: $url}')
       case "$daemon_status" in
         online)
           echo "  $server → http://localhost:$port/sse (daemon online)" ;;
