@@ -13,7 +13,9 @@
 #   mcp logs [name]              Tail daemon logs
 #
 # FLAGS:
+#   --env KEY=VALUE              Add env var to server (repeatable, add only)
 #   --no-apply                   Skip auto-apply after add/remove
+#   -h, --help                   Show help
 
 set -euo pipefail
 
@@ -125,41 +127,55 @@ cmd_add() {
   ensure_file
 
   local no_apply=false
-  local name=""
+  local env_pairs=()
   local positional=()
 
-  # Parse flags
+  # Parse flags (stop at --)
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -h|--help) usage ;;
       --no-apply) no_apply=true; shift ;;
+      --env) env_pairs+=("$2"); shift 2 ;;
+      --) break ;;
       *) positional+=("$1"); shift ;;
     esac
   done
 
-  set -- "${positional[@]}"
-  name="$1"
-  shift
+  local name="${positional[0]:?missing server name}"
 
-  if [[ "$1" == "--" ]]; then
-    shift
-    local cmd="$1"
-    shift
-    local args=("$@")
+  # Build env JSON from --env pairs
+  local env_json="{}"
+  if [[ ${#env_pairs[@]} -gt 0 ]]; then
+    for pair in "${env_pairs[@]}"; do
+      env_json=$(echo "$env_json" | jq --arg k "${pair%%=*}" --arg v "${pair#*=}" '.[$k] = $v')
+    done
+  fi
 
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+    local cmd="${1:?missing command after --}"
+    shift
     local args_json
-    args_json=$(printf '%s\n' "${args[@]}" | jq -R . | jq -s .)
+    if [[ $# -gt 0 ]]; then
+      args_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+    else
+      args_json="[]"
+    fi
 
-    jq --arg name "$name" \
-       --arg cmd "$cmd" \
-       --argjson args "$args_json" \
-       '.[$name] = {type: "stdio", command: $cmd, args: $args}' \
-       "$MCP_FILE" > "${MCP_FILE}.tmp"
+    local base
+    base=$(jq -n --arg cmd "$cmd" --argjson args "$args_json" \
+      '{type: "stdio", command: $cmd, args: $args}')
+
+    if [[ "$env_json" != "{}" ]]; then
+      base=$(echo "$base" | jq --argjson env "$env_json" '. + {env: $env}')
+    fi
+
+    jq --arg name "$name" --argjson config "$base" \
+      '.[$name] = $config' "$MCP_FILE" > "${MCP_FILE}.tmp"
   else
-    local url="$1"
-    jq --arg name "$name" \
-       --arg url "$url" \
-       '.[$name] = {type: "http", url: $url}' \
-       "$MCP_FILE" > "${MCP_FILE}.tmp"
+    local url="${positional[1]:?missing URL}"
+    jq --arg name "$name" --arg url "$url" \
+      '.[$name] = {type: "http", url: $url}' "$MCP_FILE" > "${MCP_FILE}.tmp"
   fi
 
   mv "${MCP_FILE}.tmp" "$MCP_FILE"
@@ -174,6 +190,7 @@ cmd_remove() {
   # Parse flags
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -h|--help) usage ;;
       --no-apply) no_apply=true; shift ;;
       *) name="$1"; shift ;;
     esac

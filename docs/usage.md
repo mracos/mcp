@@ -35,7 +35,7 @@ After changes, restart Claude Code for new servers to take effect.
 
 ## Server Types
 
-**Prefer `stdio-http-proxy` over plain `stdio`** - stdio spawns a new MCP server instance for every Claude Code session. With http-proxy, the server runs persistently and Claude connects via HTTP.
+**Always use `stdio-http-proxy` instead of plain `stdio`** - stdio spawns a new MCP server instance for every Claude Code session. With http-proxy, the server runs persistently and Claude connects via HTTP. All stdio servers should be proxied.
 
 ```json
 {
@@ -63,3 +63,42 @@ The `mcp` CLI outputs `sse` type (not `http`) for stdio-http-proxy servers. This
 To use `http` type, options are:
 1. Implement mock OAuth endpoints in mcp-proxy (always accept)
 2. Wait for Claude Code to add per-server OAuth disable flag
+
+## Slack MCP Server
+
+Slack MCP uses browser tokens (xoxc + xoxd) instead of OAuth - stealth mode, no app install needed.
+
+**Token types:**
+- `xoxc-...` - session token from localStorage (API calls)
+- `xoxd-...` - cookie `d` from `.slack.com` (authentication)
+
+Tokens are stored in 1Password and loaded via `op://` refs in `env.tpl`.
+
+**Add the server** (first time, via `mcp edit`):
+
+```json
+{
+  "slack": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@anthropic/slack-mcp-server@latest", "--transport", "stdio"],
+    "env": {
+      "SLACK_TOKEN": "${SLACK_MCP_XOXC_TOKEN}",
+      "SLACK_COOKIE": "${SLACK_MCP_XOXD_TOKEN}"
+    },
+    "port": 8082
+  }
+}
+```
+
+Then `mcp apply` to start the daemon. The `${...}` env vars are resolved via `envsubst` from the op cache.
+
+**Refresh tokens** (they expire periodically):
+
+```bash
+slack-chrome-tokens refresh
+```
+
+Extracts fresh tokens from Chrome, saves to 1Password, refreshes op cache. Restart the daemon with `mcp daemon stop slack && mcp daemon start slack` to pick up new env vars.
+
+If 1Password is unavailable, falls back to printing tokens for manual use.

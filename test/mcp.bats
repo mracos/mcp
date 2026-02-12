@@ -120,6 +120,62 @@ teardown() {
   assert_output '"https://example.com/mcp"'
 }
 
+@test "mcp add --help shows usage instead of creating server" {
+  echo '{}' > "$MCP_FILE"
+  echo '{}' > "$HOME/.claude.json"
+
+  run "$MCP_CLI" add --help
+  assert_success
+  assert_output --partial "USAGE"
+  refute_output --partial "Added"
+}
+
+@test "mcp add creates stdio server with env vars" {
+  echo '{}' > "$MCP_FILE"
+  echo '{}' > "$HOME/.claude.json"
+
+  run "$MCP_CLI" add --no-apply slack --env SLACK_TOKEN=xoxc-123 --env SLACK_COOKIE=xoxd-456 -- npx -y slack-mcp-server@latest --transport stdio
+  assert_success
+
+  run jq -e '.slack.type' "$MCP_FILE"
+  assert_success
+  assert_output '"stdio"'
+
+  run jq -e '.slack.env.SLACK_TOKEN' "$MCP_FILE"
+  assert_success
+  assert_output '"xoxc-123"'
+
+  run jq -e '.slack.env.SLACK_COOKIE' "$MCP_FILE"
+  assert_success
+  assert_output '"xoxd-456"'
+
+  run jq -e '.slack.command' "$MCP_FILE"
+  assert_success
+  assert_output '"npx"'
+
+  run jq -e '.slack.args[0]' "$MCP_FILE"
+  assert_success
+  assert_output '"-y"'
+}
+
+@test "mcp add creates stdio server without env when not provided" {
+  echo '{}' > "$MCP_FILE"
+  echo '{}' > "$HOME/.claude.json"
+
+  run "$MCP_CLI" add --no-apply mytool -- npx -y @example/mcp
+  assert_success
+
+  run jq -e '.mytool.env' "$MCP_FILE"
+  assert_failure
+}
+
+@test "mcp remove --help shows usage instead of failing" {
+  run "$MCP_CLI" remove --help
+  assert_success
+  assert_output --partial "USAGE"
+  refute_output --partial "not found"
+}
+
 @test "mcp add creates stdio server" {
   echo '{}' > "$MCP_FILE"
   echo '{}' > "$HOME/.claude.json"
