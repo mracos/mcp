@@ -24,7 +24,7 @@ CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
 DAEMON_DIR="${DAEMON_DIR:-$HOME/.local/share/mcp}"
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# //' | sed 's/^#//'
+  awk 'NR>=2 && NR<=17{sub(/^# /, ""); sub(/^#/, ""); print}' "$0"
   exit "${1:-0}"
 }
 
