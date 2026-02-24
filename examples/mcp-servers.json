@@ -6,9 +6,9 @@
   "readwise": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@readwise/readwise-mcp"],
+    "args": ["-y", "@iflow-mcp/readwise-mcp-enhanced"],
     "env": {
-      "ACCESS_TOKEN": "${READWISE_ACCESS_TOKEN}"
+      "READWISE_TOKEN": "${READWISE_ACCESS_TOKEN}"
     },
     "port": 8081
   },
