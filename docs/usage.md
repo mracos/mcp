@@ -1,8 +1,10 @@
 # MCP Server Management
 
-**Do NOT use `claude mcp add`** - it stores servers in `~/.claude.json` mixed with session state.
+Use the local `mcp` CLI as the source of truth for MCP servers.
 
-Instead, use the `mcp` CLI which manages `~/.claude/mcp-servers.json` (tracked in dotfiles):
+Do not manage servers directly with `claude mcp ...` or `codex mcp ...` if you want dotfiles-managed state.
+
+`mcp` manages `~/.mcp-servers.json` (tracked in dotfiles) and syncs to both clients:
 
 ```bash
 mcp list                          # List all configured servers
@@ -17,9 +19,11 @@ mcp show <name>                   # Show server config
 After changes, restart Claude Code for new servers to take effect.
 
 **How it works:**
-- `~/.claude/mcp-servers.json` is tracked in dotfiles
-- `mcp apply` (or `./link.sh ai`) merges it into `~/.claude.json`
-- Existing keys in `~/.claude.json` (sessions, state) are preserved
+- `~/.mcp-servers.json` is tracked in dotfiles
+- `mcp apply` (or `./link.sh ai`) updates:
+  - `~/.claude.json` (`mcpServers` for Claude Code)
+  - `~/.codex/config.toml` (`[mcp_servers.*]` for Codex)
+- Existing non-MCP keys in both files are preserved
 
 **Adding env vars:** Edit the file directly with `mcp edit`:
 ```json
@@ -63,6 +67,8 @@ The `mcp` CLI outputs `sse` type (not `http`) for stdio-http-proxy servers. This
 To use `http` type, options are:
 1. Implement mock OAuth endpoints in mcp-proxy (always accept)
 2. Wait for Claude Code to add per-server OAuth disable flag
+
+For Codex, proxied servers are written as streamable HTTP URLs (`http://localhost:<port>/mcp`) in `~/.codex/config.toml`.
 
 ## Slack MCP Server
 

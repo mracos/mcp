@@ -7,7 +7,7 @@
 #   mcp add <name> -- <cmd>      Add stdio MCP server
 #   mcp remove <name>            Remove an MCP server
 #   mcp edit                     Open mcp-servers.json in $EDITOR
-#   mcp apply                    Merge into ~/.claude.json
+#   mcp apply                    Sync into ~/.claude.json and ~/.codex/config.toml
 #   mcp show <name>              Show server config as JSON
 #   mcp daemon [start|stop|status|logs]  Manage MCP proxy daemons
 #   mcp logs [name]              Tail daemon logs
@@ -21,7 +21,10 @@ set -euo pipefail
 
 MCP_FILE="${MCP_FILE:-$HOME/.mcp-servers.json}"
 CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
+CODEX_CONFIG="${CODEX_CONFIG:-$HOME/.codex/config.toml}"
 DAEMON_DIR="${DAEMON_DIR:-$HOME/.local/share/mcp}"
+CODEX_MCP_BEGIN="# BEGIN managed by mcp"
+CODEX_MCP_END="# END managed by mcp"
 
 usage() {
   awk 'NR>=2 && NR<=17{sub(/^# /, ""); sub(/^#/, ""); print}' "$0"
@@ -34,6 +37,26 @@ require_jq() {
 
 ensure_file() {
   [[ -f "$MCP_FILE" ]] || echo '{}' > "$MCP_FILE"
+}
+
+extract_codex_managed_block() {
+  [[ -f "$CODEX_CONFIG" ]] || return 0
+  awk -v begin="$CODEX_MCP_BEGIN" -v end="$CODEX_MCP_END" '
+    $0 == begin {print; in_block=1; next}
+    in_block == 1 {print}
+    $0 == end {exit}
+  ' "$CODEX_CONFIG"
+}
+
+is_codex_server_applied() {
+  local name="$1"
+  [[ -f "$CODEX_CONFIG" ]] || return 1
+  awk -v begin="$CODEX_MCP_BEGIN" -v end="$CODEX_MCP_END" -v section="[mcp_servers.$name]" '
+    $0 == begin {in_block=1; next}
+    $0 == end {in_block=0}
+    in_block == 1 && $0 == section {found=1; exit}
+    END {exit found ? 0 : 1}
+  ' "$CODEX_CONFIG"
 }
 
 # Get the expected config for a server (applying transformations like cmd_apply does)
@@ -62,6 +85,15 @@ cmd_list() {
   ensure_file
 
   local all_synced=true
+  local codex_synced=true
+  local codex_expected codex_applied
+
+  codex_expected=$(build_codex_mcp_block)
+  codex_applied=$(extract_codex_managed_block)
+  if [[ "$codex_expected" != "$codex_applied" ]]; then
+    codex_synced=false
+    all_synced=false
+  fi
 
   while IFS= read -r server; do
     [[ -z "$server" ]] && continue
@@ -70,7 +102,7 @@ cmd_list() {
     type=$(jq -r ".\"$server\".type // \"http\"" "$MCP_FILE")
     url_or_cmd=$(jq -r ".\"$server\".url // .\"$server\".command" "$MCP_FILE")
 
-    # Check sync status
+    # Check Claude sync status
     local expected_hash applied_hash
     expected_hash=$(get_expected_config "$server" | jq -cS .)
     applied_hash=$(jq -cS ".mcpServers.\"$server\" // null" "$CLAUDE_JSON" 2>/dev/null)
@@ -78,6 +110,23 @@ cmd_list() {
     if [[ "$expected_hash" != "$applied_hash" ]]; then
       sync_icon="~"
       all_synced=false
+    fi
+
+    if ! $codex_synced; then
+      sync_icon="~"
+    fi
+
+    local applied_targets=()
+    if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
+      applied_targets+=("claude")
+    fi
+    if is_codex_server_applied "$server"; then
+      applied_targets+=("codex")
+    fi
+
+    local applied_display="none"
+    if [[ ${#applied_targets[@]} -gt 0 ]]; then
+      applied_display=$(IFS=,; echo "${applied_targets[*]}")
     fi
 
     if [[ "$type" == "stdio-http-proxy" ]]; then
@@ -94,9 +143,9 @@ cmd_list() {
     fi
 
     if [[ -n "$info" ]]; then
-      printf "  %s %-18s %-18s %s (%s)\n" "$sync_icon" "$server" "$type" "$url_or_cmd" "$info"
+      printf "  %s %-18s %-18s %s (applied: %s, %s)\n" "$sync_icon" "$server" "$type" "$url_or_cmd" "$applied_display" "$info"
     else
-      printf "  %s %-18s %-18s %s\n" "$sync_icon" "$server" "$type" "$url_or_cmd"
+      printf "  %s %-18s %-18s %s (applied: %s)\n" "$sync_icon" "$server" "$type" "$url_or_cmd" "$applied_display"
     fi
   done < <(jq -r 'keys[]' "$MCP_FILE")
 
@@ -227,7 +276,88 @@ cmd_remove() {
 cmd_edit() {
   ensure_file
   "${EDITOR:-vim}" "$MCP_FILE"
-  echo "Run 'mcp apply' to merge changes into ~/.claude.json"
+  echo "Run 'mcp apply' to sync changes into ~/.claude.json and ~/.codex/config.toml"
+}
+
+build_codex_mcp_block() {
+  require_jq
+  ensure_file
+
+  jq -r '
+    def common_lines:
+      [
+        (if has("startup_timeout_sec") then "startup_timeout_sec = \(.startup_timeout_sec | tojson)" else empty end),
+        (if has("tool_timeout_sec") then "tool_timeout_sec = \(.tool_timeout_sec | tojson)" else empty end),
+        (if has("enabled") then "enabled = \(.enabled | tojson)" else empty end),
+        (if has("required") then "required = \(.required | tojson)" else empty end),
+        (if has("enabled_tools") then "enabled_tools = \(.enabled_tools | tojson)" else empty end),
+        (if has("disabled_tools") then "disabled_tools = \(.disabled_tools | tojson)" else empty end),
+        (if has("env_vars") then "env_vars = \(.env_vars | tojson)" else empty end),
+        (if has("bearer_token_env_var") then "bearer_token_env_var = \(.bearer_token_env_var | tojson)" else empty end)
+      ];
+    def dict_lines($table):
+      to_entries[] | "[\($table)]", "\(.key) = \(.value | tojson)";
+    def server_lines($name):
+      . as $cfg
+      | (if ($cfg.type // "http") == "stdio-http-proxy" then
+          "[mcp_servers.\($name)]",
+          "url = \("http://localhost:\($cfg.port)/mcp" | tojson)"
+        elif ($cfg.type // "http") == "stdio" then
+          "[mcp_servers.\($name)]",
+          "command = \($cfg.command | tojson)",
+          (if has("args") then "args = \($cfg.args | tojson)" else empty end)
+        else
+          "[mcp_servers.\($name)]",
+          "url = \($cfg.url | tojson)"
+        end),
+        (. | common_lines[]),
+        (if (($cfg.type // "http") == "stdio") and has("env") then .env | dict_lines("mcp_servers.\($name).env") else empty end),
+        (if has("http_headers") then .http_headers | dict_lines("mcp_servers.\($name).http_headers") else empty end),
+        (if has("env_http_headers") then .env_http_headers | dict_lines("mcp_servers.\($name).env_http_headers") else empty end);
+    [
+      "'"$CODEX_MCP_BEGIN"'",
+      (
+        to_entries
+        | sort_by(.key)
+        | map(. as $entry | [$entry.value | server_lines($entry.key)] | join("\n"))
+        | join("\n\n")
+      ),
+      "'"$CODEX_MCP_END"'"
+    ] | join("\n")
+  ' "$MCP_FILE"
+}
+
+sync_codex_config() {
+  ensure_file
+
+  local codex_dir
+  codex_dir=$(dirname "$CODEX_CONFIG")
+  mkdir -p "$codex_dir"
+  [[ -f "$CODEX_CONFIG" ]] || touch "$CODEX_CONFIG"
+
+  local tmp existing managed
+  tmp="${CODEX_CONFIG}.tmp"
+  existing="${CODEX_CONFIG}.clean"
+  managed="${CODEX_CONFIG}.managed"
+
+  awk -v begin="$CODEX_MCP_BEGIN" -v end="$CODEX_MCP_END" '
+    $0 == begin {skip=1; next}
+    $0 == end {skip=0; next}
+    skip == 0 {print}
+  ' "$CODEX_CONFIG" > "$existing"
+
+  build_codex_mcp_block > "$managed"
+
+  {
+    cat "$existing"
+    [[ -s "$existing" ]] && echo
+    echo
+    cat "$managed"
+    echo
+  } > "$tmp"
+
+  mv "$tmp" "$CODEX_CONFIG"
+  rm -f "$existing" "$managed"
 }
 
 # Generate ecosystem.config.js from mcp-servers.json
@@ -416,9 +546,11 @@ cmd_apply() {
   # Merge into claude.json (use + not * to fully replace mcpServers)
   jq --argjson servers "$final_config" '. + {mcpServers: $servers}' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp"
   mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+  sync_codex_config
 
   echo
   echo "Merged MCP servers into $CLAUDE_JSON"
+  echo "Synced MCP servers into $CODEX_CONFIG"
 }
 
 case "${1:-}" in

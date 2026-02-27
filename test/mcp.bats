@@ -9,6 +9,7 @@ setup() {
   export HOME="$TEST_HOME"
   export MCP_FILE="$TEST_HOME/mcp-servers.json"
   export DAEMON_DIR="$TEST_HOME/.local/share/mcp"
+  export CODEX_CONFIG="$TEST_HOME/.codex/config.toml"
   export MCP_DAEMON_WAIT=0
   export HOOK_FILE="$PROJECT_ROOT/hooks/post-link/ai.sh"
   mkdir -p "$TEST_HOME/.claude"
@@ -101,6 +102,7 @@ teardown() {
   assert_output --partial "http"
   # Not synced yet, should show ~ and prompt to apply
   assert_output --partial "~"
+  assert_output --partial "applied: none"
   assert_output --partial "mcp apply"
 }
 
@@ -300,6 +302,11 @@ EOF
 
   run jq -e '.mcpServers.notion' "$HOME/.claude.json"
   assert_success
+
+  run rg -n "^\[mcp_servers\.notion\]$" "$CODEX_CONFIG"
+  assert_success
+  run rg -n '^url = "https://mcp\.notion\.com/mcp"$' "$CODEX_CONFIG"
+  assert_success
 }
 
 @test "unknown command shows error" {
@@ -374,6 +381,7 @@ EOF
   run "$MCP_CLI" list
   assert_success
   assert_output --partial "✓"
+  assert_output --partial "applied: claude,codex"
   refute_output --partial "mcp apply"
 }
 
@@ -470,6 +478,9 @@ EOF
   run jq -e '.mcpServers.myproxy.type' "$HOME/.claude.json"
   assert_success
   assert_output '"sse"'
+
+  run rg -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  assert_success
 }
 
 @test "mcp apply passes through http type unchanged" {
@@ -493,6 +504,63 @@ EOF
   run jq -e '.mcpServers.myhttp.url' "$HOME/.claude.json"
   assert_success
   assert_output '"https://example.com/mcp"'
+}
+
+@test "mcp apply writes stdio servers to codex config" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "mytool": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@example/mcp"],
+    "env": {
+      "API_KEY": "${MY_API_KEY}"
+    }
+  }
+}
+EOF
+  echo '{}' > "$HOME/.claude.json"
+
+  run "$MCP_CLI" apply
+  assert_success
+
+  run rg -n "^\[mcp_servers\.mytool\]$" "$CODEX_CONFIG"
+  assert_success
+  run rg -n '^command = "npx"$' "$CODEX_CONFIG"
+  assert_success
+  run rg -n '^args = \["-y","@example/mcp"\]$' "$CODEX_CONFIG"
+  assert_success
+  run rg -n "^\[mcp_servers\.mytool\.env\]$" "$CODEX_CONFIG"
+  assert_success
+  run rg -n '^API_KEY = "\$\{MY_API_KEY\}"$' "$CODEX_CONFIG"
+  assert_success
+}
+
+@test "mcp apply does not write env table for stdio-http-proxy codex entries" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "readwise": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@iflow-mcp/readwise-mcp-enhanced"],
+    "env": {
+      "READWISE_TOKEN": "${READWISE_ACCESS_TOKEN}"
+    },
+    "port": 8081
+  }
+}
+EOF
+  echo '{}' > "$HOME/.claude.json"
+
+  run "$MCP_CLI" apply
+  assert_success
+
+  run rg -n "^\[mcp_servers\.readwise\]$" "$CODEX_CONFIG"
+  assert_success
+  run rg -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  assert_success
+  run rg -n "^\[mcp_servers\.readwise\.env\]$" "$CODEX_CONFIG"
+  assert_failure
 }
 
 # Ecosystem file generation tests
