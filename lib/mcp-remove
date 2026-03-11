@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Remove an MCP server
+# USAGE: mcp remove <name>
+#
+# FLAGS:
+#   --no-apply    Skip auto-apply after remove
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+no_apply=false
+name=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage 0 ;;
+    --no-apply) no_apply=true; shift ;;
+    *) name="$1"; shift ;;
+  esac
+done
+
+[[ -z "$name" ]] && { echo "Error: missing server name"; exit 1; }
+
+require_jq
+ensure_file
+
+if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then
+  echo "Server '$name' not found"
+  exit 1
+fi
+
+# Stop daemon if this is a stdio-http-proxy server
+type=$(jq -r ".\"$name\".type" "$MCP_FILE")
+if [[ "$type" == "stdio-http-proxy" ]]; then
+  daemon_status=$(get_daemon_status "$name")
+  if [[ -n "$daemon_status" && "$daemon_status" != "stopped" ]]; then
+    echo "Stopping daemon for '$name'..."
+    npx pm2 delete "mcp-$name" 2>/dev/null || true
+  fi
+fi
+
+jq --arg name "$name" 'del(.[$name])' "$MCP_FILE" > "${MCP_FILE}.tmp"
+mv "${MCP_FILE}.tmp" "$MCP_FILE"
+echo "Removed '$name'"
+
+if ! $no_apply; then
+  exec "$SCRIPT_DIR/mcp-apply"
+fi

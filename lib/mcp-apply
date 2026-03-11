@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Sync mcp-servers.json into ~/.claude.json and ~/.codex/config.toml
+# USAGE: mcp apply
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+require_jq
+ensure_file
+
+[[ ! -f "$CLAUDE_JSON" ]] && echo '{}' > "$CLAUDE_JSON"
+
+# Collect stdio-http-proxy servers that need daemon start
+servers_to_start=()
+while IFS= read -r server; do
+  [[ -z "$server" ]] && continue
+  type=$(jq -r ".\"$server\".type" "$MCP_FILE")
+  if [[ "$type" == "stdio-http-proxy" ]]; then
+    daemon_status=$(get_daemon_status "$server")
+    if [[ -z "$daemon_status" || "$daemon_status" == "stopped" ]]; then
+      servers_to_start+=("$server")
+    fi
+  fi
+done < <(jq -r 'keys[]' "$MCP_FILE")
+
+# Start daemons if needed
+if [[ ${#servers_to_start[@]} -gt 0 ]]; then
+  ecosystem=$(generate_ecosystem)
+  for server in "${servers_to_start[@]}"; do
+    echo "Starting daemon for '$server'..."
+    npx pm2 start "$ecosystem" --only "mcp-$server" 2>/dev/null || true
+  done
+  sleep "${MCP_DAEMON_WAIT:-1}"
+fi
+
+# Build the final config, checking daemon status for stdio-http-proxy servers
+final_config="{}"
+while IFS= read -r server; do
+  [[ -z "$server" ]] && continue
+
+  type=$(jq -r ".\"$server\".type" "$MCP_FILE")
+
+  if [[ "$type" == "stdio-http-proxy" ]]; then
+    port=$(jq -r ".\"$server\".port" "$MCP_FILE")
+    daemon_status=$(get_daemon_status "$server")
+
+    server_config=$(jq -n --arg url "http://localhost:$port/sse" '{type: "sse", url: $url}')
+    case "$daemon_status" in
+      online)
+        echo "  $server → http://localhost:$port/sse (daemon online)" ;;
+      errored|"waiting restart")
+        echo "  $server → http://localhost:$port/sse (daemon failing)" ;;
+      stopped)
+        echo "  $server → http://localhost:$port/sse (daemon stopped)" ;;
+      *)
+        echo "  $server → http://localhost:$port/sse (daemon starting)" ;;
+    esac
+  else
+    server_config=$(jq ".\"$server\"" "$MCP_FILE")
+    echo "  $server → $type"
+  fi
+
+  final_config=$(echo "$final_config" | jq --arg name "$server" --argjson config "$server_config" '.[$name] = $config')
+done < <(jq -r 'keys[]' "$MCP_FILE")
+
+# Merge into claude.json (use + not * to fully replace mcpServers)
+jq --argjson servers "$final_config" '. + {mcpServers: $servers}' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp"
+mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+sync_codex_config
+
+echo
+echo "Merged MCP servers into $CLAUDE_JSON"
+echo "Synced MCP servers into $CODEX_CONFIG"

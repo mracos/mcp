@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Add an MCP server
+# USAGE: mcp add <name> <url>         Add HTTP MCP server
+#        mcp add <name> -- <cmd>      Add stdio MCP server
+#
+# FLAGS:
+#   --env KEY=VALUE    Add env var to server (repeatable)
+#   --no-apply         Skip auto-apply after add
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+require_jq
+ensure_file
+
+no_apply=false
+env_pairs=()
+positional=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage 0 ;;
+    --no-apply) no_apply=true; shift ;;
+    --env) env_pairs+=("$2"); shift 2 ;;
+    --) break ;;
+    *) positional+=("$1"); shift ;;
+  esac
+done
+
+name="${positional[0]:?missing server name}"
+
+# Build env JSON from --env pairs
+env_json="{}"
+if [[ ${#env_pairs[@]} -gt 0 ]]; then
+  for pair in "${env_pairs[@]}"; do
+    env_json=$(echo "$env_json" | jq --arg k "${pair%%=*}" --arg v "${pair#*=}" '.[$k] = $v')
+  done
+fi
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+  cmd="${1:?missing command after --}"
+  shift
+  if [[ $# -gt 0 ]]; then
+    args_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+  else
+    args_json="[]"
+  fi
+
+  base=$(jq -n --arg cmd "$cmd" --argjson args "$args_json" \
+    '{type: "stdio", command: $cmd, args: $args}')
+
+  if [[ "$env_json" != "{}" ]]; then
+    base=$(echo "$base" | jq --argjson env "$env_json" '. + {env: $env}')
+  fi
+
+  jq --arg name "$name" --argjson config "$base" \
+    '.[$name] = $config' "$MCP_FILE" > "${MCP_FILE}.tmp"
+else
+  url="${positional[1]:?missing URL}"
+  jq --arg name "$name" --arg url "$url" \
+    '.[$name] = {type: "http", url: $url}' "$MCP_FILE" > "${MCP_FILE}.tmp"
+fi
+
+mv "${MCP_FILE}.tmp" "$MCP_FILE"
+echo "Added '$name'"
+
+if ! $no_apply; then
+  exec "$SCRIPT_DIR/mcp-apply"
+fi

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# List all configured MCP servers
+# USAGE: mcp list
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+require_jq
+ensure_file
+
+all_synced=true
+codex_synced=true
+
+codex_expected=$(build_codex_mcp_block)
+codex_applied=$(extract_codex_managed_block)
+if [[ "$codex_expected" != "$codex_applied" ]]; then
+  codex_synced=false
+  all_synced=false
+fi
+
+while IFS= read -r server; do
+  [[ -z "$server" ]] && continue
+
+  local_type= url_or_cmd= info="" sync_icon="✓"
+  local_type=$(jq -r ".\"$server\".type // \"http\"" "$MCP_FILE")
+  url_or_cmd=$(jq -r ".\"$server\".url // .\"$server\".command" "$MCP_FILE")
+
+  # Check Claude sync status
+  expected_hash=$(get_expected_config "$server" | jq -cS .)
+  applied_hash=$(jq -cS ".mcpServers.\"$server\" // null" "$CLAUDE_JSON" 2>/dev/null)
+
+  if [[ "$expected_hash" != "$applied_hash" ]]; then
+    sync_icon="~"
+    all_synced=false
+  fi
+
+  if ! $codex_synced; then
+    sync_icon="~"
+  fi
+
+  applied_targets=()
+  if jq -e ".mcpServers.\"$server\"" "$CLAUDE_JSON" >/dev/null 2>&1; then
+    applied_targets+=("claude")
+  fi
+  if is_codex_server_applied "$server"; then
+    applied_targets+=("codex")
+  fi
+
+  applied_display="none"
+  if [[ ${#applied_targets[@]} -gt 0 ]]; then
+    applied_display=$(IFS=,; echo "${applied_targets[*]}")
+  fi
+
+  if [[ "$local_type" == "stdio-http-proxy" ]]; then
+    daemon_status=$(get_daemon_status "$server")
+    case "$daemon_status" in
+      online)           info="daemon online" ;;
+      errored)          info="daemon errored"; sync_icon="!" ;;
+      stopped)          info="daemon stopped" ;;
+      "waiting restart") info="daemon failing"; sync_icon="!" ;;
+      "")               info="daemon not started" ;;
+      *)                info="daemon $daemon_status" ;;
+    esac
+  fi
+
+  if [[ -n "$info" ]]; then
+    printf "  %s %-18s %-18s %s (applied: %s, %s)\n" "$sync_icon" "$server" "$local_type" "$url_or_cmd" "$applied_display" "$info"
+  else
+    printf "  %s %-18s %-18s %s (applied: %s)\n" "$sync_icon" "$server" "$local_type" "$url_or_cmd" "$applied_display"
+  fi
+done < <(jq -r 'keys[]' "$MCP_FILE")
+
+# Check for orphan servers in claude.json
+while IFS= read -r server; do
+  [[ -z "$server" ]] && continue
+  if ! jq -e ".\"$server\"" "$MCP_FILE" >/dev/null 2>&1; then
+    printf "  - %-18s (orphan in claude.json)\n" "$server"
+    all_synced=false
+  fi
+done < <(jq -r '.mcpServers // {} | keys[]' "$CLAUDE_JSON" 2>/dev/null)
+
+if ! $all_synced; then
+  echo
+  echo "Run 'mcp apply' to sync"
+fi

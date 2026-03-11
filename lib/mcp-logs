@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Tail daemon logs
+# USAGE: mcp logs [name]
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+name="${1:-}"
+if [[ -n "$name" ]]; then
+  npx pm2 logs "mcp-$name"
+else
+  npx pm2 logs
+fi
