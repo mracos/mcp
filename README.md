@@ -122,6 +122,8 @@ Or edit directly with `mcp edit`:
 
 Existing non-MCP keys in both target files are preserved.
 
+Daemon management currently uses Node.js (npx/PM2). The backend should be pluggable - other process managers or runtimes shouldn't require Node.js installed.
+
 ## Testing
 
 ```bash
