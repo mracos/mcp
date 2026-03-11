@@ -22,7 +22,13 @@ git clone https://github.com/mracos/mcp ~/.mcp
 export PATH="$HOME/.mcp/bin:$PATH"
 ```
 
-Requires `jq`. Daemon features require `npx` and `mcp-proxy`.
+## Requirements
+
+- **bash** 3.2+ (macOS stock bash works)
+- **[jq](https://jqlang.github.io/jq/)** - JSON processing (all commands)
+- **Node.js / npx** - daemon management only (`mcp daemon`, `stdio-http-proxy` servers)
+- **[mcp-proxy](https://github.com/nicholasgasior/mcp-proxy)** - stdio-to-HTTP proxy (`npx mcp-proxy`)
+- **envsubst** (gettext) - env var expansion in daemon configs
 
 ## Usage
 
