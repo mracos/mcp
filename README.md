@@ -8,16 +8,20 @@ Supported targets:
 
 ## Install
 
-```zsh
-# zinit
-zinit ice as"command" pick"bin/mcp"
+**zinit**
+
+```sh
+# as command (in a `zinit for as"command"` block)
+pick"bin/*" mracos/mcp
+
+# or standalone
+zinit ice as"command" pick"bin/*"
 zinit light mracos/mcp
+```
 
-# sheldon (plugins.toml)
-[plugins.mcp]
-github = "mracos/mcp"
+**Clone + PATH**
 
-# manual
+```sh
 git clone https://github.com/mracos/mcp ~/.mcp
 export PATH="$HOME/.mcp/bin:$PATH"
 ```
