@@ -27,9 +27,9 @@ while [[ -L "$SOURCE" ]]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
-LIB_DIR="$REPO_ROOT/lib/shell/mcp"
-source "$REPO_ROOT/lib/shell/shared/lib-cli.bash"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+LIB_DIR="$REPO_ROOT/lib"
+source "$LIB_DIR/lib-cli.bash"
 
 cmd="${1:-}"
 cli_is_help "$cmd" && usage 0
