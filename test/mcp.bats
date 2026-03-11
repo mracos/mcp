@@ -2,7 +2,7 @@
 
 load "$PROJECT_ROOT/test/test_helper.bash"
 
-MCP_CLI="$PROJECT_ROOT/files/shell/bin/mcp"
+MCP_CLI="$PROJECT_ROOT/bin/mcp"
 
 setup() {
   TEST_HOME="$(mktemp -d)"
@@ -11,7 +11,7 @@ setup() {
   export DAEMON_DIR="$TEST_HOME/.local/share/mcp"
   export CODEX_CONFIG="$TEST_HOME/.codex/config.toml"
   export MCP_DAEMON_WAIT=0
-  export HOOK_FILE="$PROJECT_ROOT/hooks/post-link/ai.sh"
+
   mkdir -p "$TEST_HOME/.claude"
   mkdir -p "$DAEMON_DIR"
 
