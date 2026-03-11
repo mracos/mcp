@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Manage MCP proxy daemons
+# USAGE: mcp daemon [start|stop|status|logs] [name]
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+subcmd="${1:-status}"
+cli_is_help "$subcmd" && usage 0
+shift || true
+
+case "$subcmd" in
+  start)
+    name="${1:-}"
+    ecosystem=$(generate_ecosystem)
+    echo "Generated $ecosystem"
+
+    if [[ -n "$name" ]]; then
+      npx pm2 start "$ecosystem" --only "mcp-$name"
+    else
+      npx pm2 start "$ecosystem"
+    fi
+    echo
+    echo "Run 'mcp apply' to update Claude config to use HTTP endpoints"
+    ;;
+  stop)
+    name="${1:-}"
+    if [[ -n "$name" ]]; then
+      npx pm2 stop "mcp-$name"
+    else
+      npx pm2 stop all
+    fi
+    echo
+    echo "Run 'mcp apply' to update Claude config to use stdio"
+    ;;
+  status|"")
+    npx pm2 list
+    ;;
+  logs)
+    name="${1:-}"
+    if [[ -n "$name" ]]; then
+      npx pm2 logs "mcp-$name"
+    else
+      npx pm2 logs
+    fi
+    ;;
+  *)
+    echo "Unknown daemon subcommand: $subcmd"
+    echo "Usage: mcp daemon [start|stop|status|logs] [name]"
+    exit 1
+    ;;
+esac

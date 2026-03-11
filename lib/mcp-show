@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Show server config as JSON
+# USAGE: mcp show <name>
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+name="${1:-}"
+[[ -z "$name" ]] && usage
+
+require_jq
+ensure_file
+jq -e ".\"$name\"" "$MCP_FILE" || { echo "Server '$name' not found"; exit 1; }

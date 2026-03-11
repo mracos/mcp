@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Open mcp-servers.json in $EDITOR
+# USAGE: mcp edit
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$(dirname "$SCRIPT_DIR")/shared/lib-cli.bash" --auto "$@"
+source "$SCRIPT_DIR/lib-mcp.bash"
+
+ensure_file
+"${EDITOR:-vim}" "$MCP_FILE"
+echo "Run 'mcp apply' to sync changes into ~/.claude.json and ~/.codex/config.toml"
