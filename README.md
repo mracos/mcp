@@ -68,7 +68,7 @@ mcp add mytool -- npx -y @example/mcp
 
 ### stdio-http-proxy
 
-Runs the stdio server as a persistent daemon via `mcp-proxy`, connects via HTTP. Prefer this over plain `stdio` to avoid spawning a new process per session:
+stdio servers spawn a new process for every Claude Code session - slow startup, no shared state, duplicate processes if you have multiple windows. `stdio-http-proxy` runs the server once as a persistent daemon via [mcp-proxy](https://github.com/nicholasgasior/mcp-proxy) and connects clients over HTTP:
 
 ```json
 {
