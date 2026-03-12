@@ -303,9 +303,9 @@ EOF
   run jq -e '.mcpServers.notion' "$HOME/.claude.json"
   assert_success
 
-  run rg -n "^\[mcp_servers\.notion\]$" "$CODEX_CONFIG"
+  run grep -n "^\[mcp_servers\.notion\]$" "$CODEX_CONFIG"
   assert_success
-  run rg -n '^url = "https://mcp\.notion\.com/mcp"$' "$CODEX_CONFIG"
+  run grep -n '^url = "https://mcp\.notion\.com/mcp"$' "$CODEX_CONFIG"
   assert_success
 }
 
@@ -479,7 +479,7 @@ EOF
   assert_success
   assert_output '"sse"'
 
-  run rg -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  run grep -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
   assert_success
 }
 
@@ -524,15 +524,15 @@ EOF
   run "$MCP_CLI" apply
   assert_success
 
-  run rg -n "^\[mcp_servers\.mytool\]$" "$CODEX_CONFIG"
+  run grep -n "^\[mcp_servers\.mytool\]$" "$CODEX_CONFIG"
   assert_success
-  run rg -n '^command = "npx"$' "$CODEX_CONFIG"
+  run grep -n '^command = "npx"$' "$CODEX_CONFIG"
   assert_success
-  run rg -n '^args = \["-y","@example/mcp"\]$' "$CODEX_CONFIG"
+  run grep -nF 'args = ["-y","@example/mcp"]' "$CODEX_CONFIG"
   assert_success
-  run rg -n "^\[mcp_servers\.mytool\.env\]$" "$CODEX_CONFIG"
+  run grep -n "^\[mcp_servers\.mytool\.env\]$" "$CODEX_CONFIG"
   assert_success
-  run rg -n '^API_KEY = "\$\{MY_API_KEY\}"$' "$CODEX_CONFIG"
+  run grep -nF 'API_KEY = "${MY_API_KEY}"' "$CODEX_CONFIG"
   assert_success
 }
 
@@ -555,11 +555,11 @@ EOF
   run "$MCP_CLI" apply
   assert_success
 
-  run rg -n "^\[mcp_servers\.readwise\]$" "$CODEX_CONFIG"
+  run grep -n "^\[mcp_servers\.readwise\]$" "$CODEX_CONFIG"
   assert_success
-  run rg -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  run grep -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
   assert_success
-  run rg -n "^\[mcp_servers\.readwise\.env\]$" "$CODEX_CONFIG"
+  run grep -n "^\[mcp_servers\.readwise\.env\]$" "$CODEX_CONFIG"
   assert_failure
 }
 
