@@ -31,14 +31,16 @@ if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Stop daemon if this is a stdio-http-proxy server
+# Stop and delete daemon registration if this is a stdio-http-proxy server.
+# backend_delete is always called so stale tombstones (status=stopped after
+# crash-loop) are cleaned up too, not just live daemons.
 type=$(jq -r ".\"$name\".type" "$MCP_FILE")
 if [[ "$type" == "stdio-http-proxy" ]]; then
   daemon_status=$(get_daemon_status "$name")
-  if [[ -n "$daemon_status" && "$daemon_status" != "stopped" ]]; then
+  if [[ -n "$daemon_status" ]]; then
     echo "Stopping daemon for '$name'..."
-    backend_delete "$name"
   fi
+  backend_delete "$name"
 fi
 
 jq --arg name "$name" 'del(.[$name])' "$MCP_FILE" > "${MCP_FILE}.tmp"

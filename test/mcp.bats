@@ -259,6 +259,31 @@ EOF
   assert_output --partial "pm2 delete mcp-myproxy"
 }
 
+@test "mcp remove deletes pm2 tombstone for stopped daemon" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "myproxy": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@example/mcp"],
+    "port": 8081
+  }
+}
+EOF
+  echo '{}' > "$HOME/.claude.json"
+
+  # Tombstone: pm2 still has the entry but it's stopped (e.g. crash-looped to max_restarts)
+  echo '[{"name": "mcp-myproxy", "pm2_env": {"status": "stopped"}}]' > "$HOME/.mock-pm2-state"
+
+  run "$MCP_CLI" remove --no-apply myproxy
+  assert_success
+  assert_output --partial "Removed"
+
+  # pm2 delete must still be called so the tombstone is cleaned
+  run cat "$HOME/.mock-pm2-log"
+  assert_output --partial "pm2 delete mcp-myproxy"
+}
+
 @test "mcp remove fails for non-existent server" {
   echo '{}' > "$MCP_FILE"
 
