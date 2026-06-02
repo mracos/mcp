@@ -81,6 +81,10 @@ export MCP_BACKEND=pm2   # default
 mcp daemon start
 ```
 
+The backend resolves top-level binaries (`npx`, the server's `command`) to absolute paths at generation time and injects `PATH` so the daemon's child spawns don't depend on the inherited environment. This fixes the `spawn bunx ENOENT` failure mode that hits servers running under bun/uvx/etc. when PM2 is started outside an interactive shell.
+
+If a tool comes from `mise`, make sure it's installed (e.g. `mise install bun`) before running `mcp daemon start` — `mcp` resolves via `command -v` and falls back to `~/.local/share/mise/shims`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`. After upgrading a tool via mise, re-run `mcp daemon start` to refresh the absolute paths in the generated config.
+
 See [docs/adrs/0001-mcp-backend-abstraction.md](adrs/0001-mcp-backend-abstraction.md) for the backend design.
 
 ## Slack MCP Server

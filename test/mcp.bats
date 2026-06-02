@@ -590,3 +590,86 @@ EOF
   assert_output --partial "mcp-proxy"
   assert_output --partial "8081"
 }
+
+@test "ecosystem uses absolute script path (self-contained npx)" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "test": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  # script field should be an absolute path, not bare 'npx'
+  run grep -E "script: '/" "$DAEMON_DIR/ecosystem.config.js"
+  assert_success
+}
+
+@test "ecosystem inlines absolute path for inner command" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "test": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  # The inner command after `-- ` should be an absolute path
+  run grep -E "mcp-proxy --port 8081 -- /[^ ]+/npx -y @test/mcp" "$DAEMON_DIR/ecosystem.config.js"
+  assert_success
+}
+
+@test "ecosystem injects PATH env for child spawns" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "test": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  run grep -E '"PATH":' "$DAEMON_DIR/ecosystem.config.js"
+  assert_success
+  assert_output --partial "/opt/homebrew/bin"
+}
+
+@test "ecosystem preserves user env vars alongside PATH" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "test": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081,
+    "env": {
+      "MY_TOKEN": "abc123"
+    }
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  run cat "$DAEMON_DIR/ecosystem.config.js"
+  assert_output --partial '"MY_TOKEN":"abc123"'
+  assert_output --partial '"PATH":'
+}

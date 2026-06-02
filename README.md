@@ -135,6 +135,8 @@ export MCP_BACKEND=pm2   # default
 mcp daemon start
 ```
 
+The backend is *self-contained*: top-level binaries (`npx`, the inner `command`) are resolved to absolute paths at generation time and `PATH` is injected into the daemon's environment so child spawns work even when the pm2 process starts from a minimal env.
+
 The backend interface is defined in `lib/lib-backend.bash`; see [docs/adrs/0001-mcp-backend-abstraction.md](docs/adrs/0001-mcp-backend-abstraction.md) for the design.
 
 ## Testing

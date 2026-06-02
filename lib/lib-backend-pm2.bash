@@ -16,6 +16,10 @@ _pm2_generate_ecosystem() {
   local ecosystem
   ecosystem=$(_pm2_ecosystem_path)
 
+  local daemon_path npx_abs
+  daemon_path=$(backend_env_path)
+  npx_abs=$(resolve_command "npx") || true
+
   echo "module.exports = {" > "$ecosystem"
   echo "  apps: [" >> "$ecosystem"
 
@@ -23,18 +27,20 @@ _pm2_generate_ecosystem() {
   while IFS= read -r server; do
     [[ -z "$server" ]] && continue
 
-    local type port cmd args_json env_json
+    local type port cmd cmd_abs args_str env_json
     type=$(jq -r ".\"$server\".type" "$MCP_FILE")
 
     [[ "$type" != "stdio-http-proxy" ]] && continue
 
     port=$(jq -r ".\"$server\".port" "$MCP_FILE")
     cmd=$(jq -r ".\"$server\".command" "$MCP_FILE")
-    args_json=$(jq -r ".\"$server\".args | join(\" \")" "$MCP_FILE")
+    cmd_abs=$(resolve_command "$cmd") || true
+    args_str=$(jq -r ".\"$server\".args | join(\" \")" "$MCP_FILE")
 
-    local proxy_args="mcp-proxy --port $port -- $cmd $args_json"
+    local proxy_args="mcp-proxy --port $port -- $cmd_abs $args_str"
 
     env_json=$(jq -c ".\"$server\".env // {}" "$MCP_FILE" | envsubst)
+    env_json=$(echo "$env_json" | jq -c --arg p "$daemon_path" '. + {PATH: $p}')
 
     $first || echo "," >> "$ecosystem"
     first=false
@@ -42,7 +48,7 @@ _pm2_generate_ecosystem() {
     cat >> "$ecosystem" << EOF
     {
       name: 'mcp-$server',
-      script: 'npx',
+      script: '$npx_abs',
       args: '$proxy_args',
       env: $env_json,
       max_restarts: 10,
