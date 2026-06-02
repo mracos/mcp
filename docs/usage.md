@@ -75,13 +75,14 @@ For Codex, proxied servers are written as streamable HTTP URLs (`http://localhos
 `mcp daemon` is backend-agnostic. Select with `MCP_BACKEND`:
 
 - `pm2` (default) — runs daemons under PM2. Requires `npx`.
+- `launchd` — runs daemons as macOS launch agents via the [`launcher`](https://github.com/mracos/launcher) CLI. Plists are written to `~/.local/share/mcp/` and symlinked into `~/Library/LaunchAgents`.
 
 ```bash
-export MCP_BACKEND=pm2   # default
+export MCP_BACKEND=launchd
 mcp daemon start
 ```
 
-The backend resolves top-level binaries (`npx`, the server's `command`) to absolute paths at generation time and injects `PATH` so the daemon's child spawns don't depend on the inherited environment. This fixes the `spawn bunx ENOENT` failure mode that hits servers running under bun/uvx/etc. when PM2 is started outside an interactive shell.
+Both backends resolve top-level binaries (`npx`, the server's `command`) to absolute paths at generation time and inject `PATH` so the daemon's child spawns don't depend on the inherited environment. This fixes the `spawn bunx ENOENT` failure mode that hits servers running under bun/uvx/etc. when PM2 or launchd is started outside an interactive shell.
 
 If a tool comes from `mise`, make sure it's installed (e.g. `mise install bun`) before running `mcp daemon start` — `mcp` resolves via `command -v` and falls back to `~/.local/share/mise/shims`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`. After upgrading a tool via mise, re-run `mcp daemon start` to refresh the absolute paths in the generated config.
 

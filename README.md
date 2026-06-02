@@ -30,9 +30,10 @@ export PATH="$HOME/.mcp/bin:$PATH"
 
 - **bash** 3.2+ (macOS stock bash works)
 - **[jq](https://jqlang.github.io/jq/)** - JSON processing (all commands)
-- **Node.js / npx** - daemon management only (`mcp daemon`, `stdio-http-proxy` servers)
+- **Node.js / npx** - daemon management (`mcp daemon`, `stdio-http-proxy` servers)
 - **[mcp-proxy](https://github.com/nicholasgasior/mcp-proxy)** - stdio-to-HTTP proxy (`npx mcp-proxy`)
 - **envsubst** (gettext) - env var expansion in daemon configs
+- **[launcher](https://github.com/mracos/launcher)** - only if you set `MCP_BACKEND=launchd`
 
 ## Usage
 
@@ -129,13 +130,14 @@ Existing non-MCP keys in both target files are preserved.
 | Backend | When to use | Notes |
 |---|---|---|
 | `pm2` (default) | Cross-platform, fast iteration | Requires `npx`; pm2 installed lazily on first use |
+| `launchd` | macOS native, survives reboots | Requires the [`launcher`](https://github.com/mracos/launcher) CLI in PATH |
 
 ```bash
-export MCP_BACKEND=pm2   # default
+export MCP_BACKEND=launchd   # or pm2 (default)
 mcp daemon start
 ```
 
-The backend is *self-contained*: top-level binaries (`npx`, the inner `command`) are resolved to absolute paths at generation time and `PATH` is injected into the daemon's environment so child spawns work even when the pm2 process starts from a minimal env.
+Both backends are *self-contained*: top-level binaries (`npx`, the inner `command`) are resolved to absolute paths at generation time and `PATH` is injected into the daemon's environment so child spawns work even when the launchd/pm2 process starts from a minimal env.
 
 The backend interface is defined in `lib/lib-backend.bash`; see [docs/adrs/0001-mcp-backend-abstraction.md](docs/adrs/0001-mcp-backend-abstraction.md) for the design.
 

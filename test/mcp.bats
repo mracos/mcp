@@ -673,3 +673,165 @@ EOF
   assert_output --partial '"MY_TOKEN":"abc123"'
   assert_output --partial '"PATH":'
 }
+
+# launchd backend tests
+#
+# These tests set MCP_BACKEND=launchd and mock the `launcher` CLI so we can
+# assert that mcp's launchd backend wires the right commands.
+
+_setup_launchd_mock() {
+  cat > "$MOCK_BIN/launcher" << 'MOCK'
+#!/usr/bin/env bash
+echo "mock: launcher $*" >> "$HOME/.mock-launcher-log"
+case "$1" in
+  new)
+    # launcher new -d DIR NAME CMD
+    shift
+    dir=""
+    if [[ "$1" == "-d" || "$1" == "--dir" ]]; then
+      dir="$2"; shift 2
+    fi
+    name="$1"
+    cmd="$2"
+    plist="${dir:-$LAUNCHER_DIR}/${LAUNCHER_PREFIX:-mcp}.${name}.plist"
+    mkdir -p "$(dirname "$plist")"
+    cat > "$plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LAUNCHER_PREFIX:-mcp}.${name}</string>
+  <key>ProgramArguments</key><array><string>$cmd</string></array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+EOF
+    ;;
+  info)
+    name="$2"
+    cat << EOF
+Agent: $name
+Status: running
+EOF
+    ;;
+  ls)
+    echo "mock launcher ls"
+    ;;
+  *)
+    : # no-op for load/unload/link/unlink/rm/logs
+    ;;
+esac
+exit 0
+MOCK
+  chmod +x "$MOCK_BIN/launcher"
+}
+
+@test "MCP_BACKEND=launchd dispatches to launcher CLI on daemon start" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "granola": {
+    "type": "stdio-http-proxy",
+    "command": "bunx",
+    "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
+    "port": 8083
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  run cat "$HOME/.mock-launcher-log"
+  assert_output --partial "launcher new"
+  assert_output --partial "granola"
+  assert_output --partial "launcher link --all"
+  assert_output --partial "launcher load --all"
+}
+
+@test "MCP_BACKEND=launchd writes plist with env-wrapped command" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "granola": {
+    "type": "stdio-http-proxy",
+    "command": "bunx",
+    "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
+    "port": 8083
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  plist="$DAEMON_DIR/mcp.granola.plist"
+  assert [ -f "$plist" ]
+
+  run cat "$plist"
+  assert_output --partial "/usr/bin/env PATH="
+  assert_output --partial "mcp-proxy --port 8083"
+  assert_output --partial "bunx"
+}
+
+@test "MCP_BACKEND=launchd daemon stop calls launcher unload" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  echo '{}' > "$MCP_FILE"
+
+  run "$MCP_CLI" daemon stop granola
+  assert_success
+
+  run cat "$HOME/.mock-launcher-log"
+  assert_output --partial "launcher unload granola"
+}
+
+@test "MCP_BACKEND=launchd daemon status calls launcher ls" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  echo '{}' > "$MCP_FILE"
+
+  run "$MCP_CLI" daemon status
+  assert_success
+  assert_output --partial "mock launcher ls"
+}
+
+@test "MCP_BACKEND=launchd server_status maps running to online" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "granola": {
+    "type": "stdio-http-proxy",
+    "command": "bunx",
+    "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
+    "port": 8083
+  }
+}
+EOF
+  echo '{}' > "$HOME/.claude.json"
+
+  "$MCP_CLI" daemon start
+
+  # apply should now treat granola as online (sse url) because mock launcher
+  # info reports "Status: running"
+  run "$MCP_CLI" apply
+  assert_success
+  assert_output --partial "granola → http://localhost:8083/sse (daemon online)"
+}
+
+@test "MCP_BACKEND=launchd unknown backend exits with clear error" {
+  export MCP_BACKEND=bogus
+
+  echo '{}' > "$MCP_FILE"
+
+  run "$MCP_CLI" list
+  assert_failure
+  assert_output --partial "unknown MCP_BACKEND='bogus'"
+}
