@@ -116,13 +116,26 @@ Or edit directly with `mcp edit`:
 
 `~/.mcp-servers.json` is the source of truth. `mcp apply` reads it and:
 
-1. Starts daemons for `stdio-http-proxy` servers (via PM2)
+1. Starts daemons for `stdio-http-proxy` servers (via the active backend)
 2. Merges server configs into `~/.claude.json`
 3. Syncs server configs into `~/.codex/config.toml`
 
 Existing non-MCP keys in both target files are preserved.
 
-Daemon management currently uses Node.js (npx/PM2). The backend should be pluggable - other process managers or runtimes shouldn't require Node.js installed.
+### Daemon backends
+
+`mcp daemon` dispatches to a pluggable backend selected by `MCP_BACKEND`:
+
+| Backend | When to use | Notes |
+|---|---|---|
+| `pm2` (default) | Cross-platform, fast iteration | Requires `npx`; pm2 installed lazily on first use |
+
+```bash
+export MCP_BACKEND=pm2   # default
+mcp daemon start
+```
+
+The backend interface is defined in `lib/lib-backend.bash`; see [docs/adrs/0001-mcp-backend-abstraction.md](docs/adrs/0001-mcp-backend-abstraction.md) for the design.
 
 ## Testing
 

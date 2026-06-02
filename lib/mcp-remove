@@ -37,7 +37,7 @@ if [[ "$type" == "stdio-http-proxy" ]]; then
   daemon_status=$(get_daemon_status "$name")
   if [[ -n "$daemon_status" && "$daemon_status" != "stopped" ]]; then
     echo "Stopping daemon for '$name'..."
-    npx pm2 delete "mcp-$name" 2>/dev/null || true
+    backend_delete "$name"
   fi
 fi
 

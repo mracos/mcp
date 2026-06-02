@@ -36,10 +36,10 @@ is_codex_server_applied() {
   ' "$CODEX_CONFIG"
 }
 
-# Get daemon status: online, errored, stopped, or empty if not registered
+# Get daemon status: online, errored, stopped, or empty if not registered.
+# Thin forwarder to the active backend (see lib-backend.bash).
 get_daemon_status() {
-  local name="$1"
-  npx pm2 jlist 2>/dev/null | jq -r ".[] | select(.name == \"mcp-$name\") | .pm2_env.status" 2>/dev/null || echo ""
+  backend_server_status "$1"
 }
 
 # Get the expected config for a server (applying transformations like mcp-apply does)
@@ -144,53 +144,7 @@ sync_codex_config() {
   rm -f "$existing" "$managed"
 }
 
-# Generate ecosystem.config.js from mcp-servers.json
-generate_ecosystem() {
-  require_jq
-  ensure_file
-  mkdir -p "$DAEMON_DIR"
-
-  local ecosystem="$DAEMON_DIR/ecosystem.config.js"
-
-  echo "module.exports = {" > "$ecosystem"
-  echo "  apps: [" >> "$ecosystem"
-
-  local first=true
-  while IFS= read -r server; do
-    [[ -z "$server" ]] && continue
-
-    local type port cmd args_json env_json
-    type=$(jq -r ".\"$server\".type" "$MCP_FILE")
-
-    [[ "$type" != "stdio-http-proxy" ]] && continue
-
-    port=$(jq -r ".\"$server\".port" "$MCP_FILE")
-    cmd=$(jq -r ".\"$server\".command" "$MCP_FILE")
-    args_json=$(jq -r ".\"$server\".args | join(\" \")" "$MCP_FILE")
-
-    local proxy_args="mcp-proxy --port $port -- $cmd $args_json"
-
-    env_json=$(jq -c ".\"$server\".env // {}" "$MCP_FILE" | envsubst)
-
-    $first || echo "," >> "$ecosystem"
-    first=false
-
-    cat >> "$ecosystem" << EOF
-    {
-      name: 'mcp-$server',
-      script: 'npx',
-      args: '$proxy_args',
-      env: $env_json,
-      max_restarts: 10,
-      min_uptime: 5000,
-      restart_delay: 1000,
-      exp_backoff_restart_delay: 500
-    }
-EOF
-  done < <(jq -r 'keys[]' "$MCP_FILE")
-
-  echo "  ]" >> "$ecosystem"
-  echo "}" >> "$ecosystem"
-
-  echo "$ecosystem"
-}
+# Backend dispatch (must come after require_jq/ensure_file are defined; backend
+# implementations rely on them).
+# shellcheck source=/dev/null
+source "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-backend.bash"

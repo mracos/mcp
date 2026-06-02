@@ -27,10 +27,10 @@ done < <(jq -r 'keys[]' "$MCP_FILE")
 
 # Start daemons if needed
 if [[ ${#servers_to_start[@]} -gt 0 ]]; then
-  ecosystem=$(generate_ecosystem)
+  backend_apply
   for server in "${servers_to_start[@]}"; do
     echo "Starting daemon for '$server'..."
-    npx pm2 start "$ecosystem" --only "mcp-$server" 2>/dev/null || true
+    backend_start "$server" 2>/dev/null || true
   done
   sleep "${MCP_DAEMON_WAIT:-1}"
 fi

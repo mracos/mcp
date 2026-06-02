@@ -70,6 +70,19 @@ To use `http` type, options are:
 
 For Codex, proxied servers are written as streamable HTTP URLs (`http://localhost:<port>/mcp`) in `~/.codex/config.toml`.
 
+## Daemon Backends
+
+`mcp daemon` is backend-agnostic. Select with `MCP_BACKEND`:
+
+- `pm2` (default) — runs daemons under PM2. Requires `npx`.
+
+```bash
+export MCP_BACKEND=pm2   # default
+mcp daemon start
+```
+
+See [docs/adrs/0001-mcp-backend-abstraction.md](adrs/0001-mcp-backend-abstraction.md) for the backend design.
+
 ## Slack MCP Server
 
 Slack MCP uses browser tokens (xoxc + xoxd) instead of OAuth - stealth mode, no app install needed.
