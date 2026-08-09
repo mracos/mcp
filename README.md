@@ -147,3 +147,7 @@ The backend interface is defined in `lib/lib-backend.bash`; see [docs/adrs/0001-
 npm install
 npm test
 ```
+
+## Provenance
+
+Read-only mirror, generated and kept in sync by CI. PRs here are cherry-picked upstream and synced back, so open a PR rather than editing directly.
