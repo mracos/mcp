@@ -12,6 +12,42 @@
 #
 # Shared across: dotfiles, mracos/launcher, mracos/mcp
 
+# --- Portable helpers ---
+
+# In-place sed that works on both GNU and BSD sed. `sed -i ''` (BSD idiom)
+# makes GNU read '' as an empty script and the real script as a filename;
+# `sed -i` (GNU idiom) makes BSD eat the next arg as the backup suffix.
+# Sidestep both by dropping -i: run sed to a temp file and move it back.
+# The last argument is the file; everything before it is the sed script/flags.
+sed_i() {
+  local _n=$# _f="${@: -1}" _t
+  _t="$(mktemp)"
+  sed "${@:1:$((_n - 1))}" "$_f" > "$_t" && mv "$_t" "$_f"
+}
+
+# Reformat a date string, portable across BSD and GNU date. BSD needs the
+# input format (`-j -f`); GNU auto-parses (`-d`). Try BSD first (so macOS
+# behavior is unchanged) then fall back to GNU. Input format `%s` means the
+# string is an epoch. Returns non-zero if neither can parse (callers keep
+# their own `|| default`). Usage: date_reformat <infmt> <str> <outfmt>
+date_reformat() {
+  case "$1" in
+    %s) date -r "$2" "$3" 2>/dev/null || date -d "@$2" "$3" 2>/dev/null ;;
+    *)  date -j -f "$1" "$2" "$3" 2>/dev/null || date -d "$2" "$3" 2>/dev/null ;;
+  esac
+}
+
+# Shift a date by whole days, portable. `base` empty = today. `days` is a
+# signed count like -30 or +1. Usage: date_shift <base|""> <signed-days> <outfmt>
+date_shift() {
+  local _b="$1" _n="$2" _f="$3"
+  if [[ -z "$_b" ]]; then
+    date -j -v"${_n}d" "$_f" 2>/dev/null || date -d "$_n days" "$_f" 2>/dev/null
+  else
+    date -j -v"${_n}d" -f "%Y-%m-%d" "$_b" "$_f" 2>/dev/null || date -d "$_b $_n days" "$_f" 2>/dev/null
+  fi
+}
+
 # --- Dispatch helpers ---
 
 # Return success if token is a standard help flag.

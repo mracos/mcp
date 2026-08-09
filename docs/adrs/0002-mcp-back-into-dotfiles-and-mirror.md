@@ -35,7 +35,7 @@ Bringing it back meant re-homing it on the current shared `lib-cli.bash`: subcom
 
 ### Mechanism (identical shape to nbx/0011)
 
-- **`scripts/extract-mcp.sh <build-dir>`**: pure offline assembler. Gathers mcp's files into the standalone `bin/` + `lib/` layout, **vendors `lib-cli.bash` from `lib/shell/shared/`**, and applies two path rewrites:
+- **`scripts/extract-mcp.sh <build-dir>`** (later folded into the generic `scripts/extract.sh mcp`, ADR [tools/0003](../tools/0003-generic-extraction-engine.md)): pure offline assembler. Gathers mcp's files into the standalone `bin/` + `lib/` layout, **vendors `lib-cli.bash` from `lib/shell/shared/`**, and applies two path rewrites:
   - dispatcher: `${SCRIPT_DIR%/files/shell/bin}` -> `${SCRIPT_DIR%/bin}`, `$REPO_ROOT/lib/shell/mcp` -> `$REPO_ROOT/lib`, shared `lib-cli` -> `lib/lib-cli.bash`.
   - subcommands: `$LIB_ROOT/shared/lib-cli.bash` -> `$SCRIPT_DIR/lib-cli.bash` (flat layout), dropping the now-unused `LIB_ROOT` line.
   - `lib-mcp.bash` / `lib-backend*.bash` copy verbatim (they resolve siblings via `${BASH_SOURCE[0]%/*}`, which is layout-agnostic).
