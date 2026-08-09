@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 
 load "$PROJECT_ROOT/test/test_helper.bash"
 

@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-# Shared CLI helpers for subcommand dispatchers
+# Shared CLI helpers for dotfiles scripts.
+#
+# Three sections:
+#   1. Dispatch — subcommand routing, help flags, usage printing
+#   2. fzf      — interactive pickers (cli_fzf_pick for args, cli_fzf_multi for stdin)
+#   3. Auto-help — source-time setup for --auto-help and --dispatch
+#
+# Source with --auto-help to get usage()/--help for free:
+#   source lib-cli.bash --auto-help "$@"
+#   source lib-cli.bash --auto-help --dispatch -- "$@"
+#
+# Shared across: dotfiles, mracos/launcher, mracos/mcp
+
+# --- Dispatch helpers ---
 
 # Return success if token is a standard help flag.
 cli_is_help() {
@@ -35,38 +48,6 @@ cli_usage_until_blank() {
   exit "$code"
 }
 
-# --- Auto-help (source-time) ---
-# Capture caller and define usage(). Pass --auto to opt into help checking.
-#
-#   source "path/to/lib-cli.bash" --auto "$@"  # usage() + auto --help
-#   source "path/to/lib-cli.bash"               # usage() only
-#
-# Scripts can override usage() after sourcing if they need custom behavior.
-_CLI_SCRIPT="${BASH_SOURCE[1]}"
-
-usage() {
-  awk 'NR>1 && /^$/{exit} NR>1{sub(/^# /, ""); sub(/^#/, ""); print}' "$_CLI_SCRIPT"
-  exit "${1:-1}"
-}
-
-if [[ "${1:-}" == "--auto" ]]; then
-  shift
-  cli_is_help "${1:-}" && usage 0
-fi
-
-# Resolve script directory, following symlinks.
-# Usage: dir=$(cli_resolve_script_dir)
-cli_resolve_script_dir() {
-  local source="${1:-${BASH_SOURCE[1]}}"
-  while [[ -L "$source" ]]; do
-    local dir
-    dir="$(cd -P "$(dirname "$source")" && pwd)"
-    source="$(readlink "$source")"
-    [[ "$source" != /* ]] && source="$dir/$source"
-  done
-  cd -P "$(dirname "$source")" && pwd
-}
-
 # Exec subcommand script if it exists/executable.
 # Callers pass raw "$@" (unshifted) - the function safely consumes the cmd.
 # Usage: cli_exec_subcommand <base-dir> <prefix> <cmd> "$@"
@@ -80,9 +61,67 @@ cli_exec_subcommand() {
 
   local subcmd="$base_dir/${prefix}${cmd}"
   if [[ -x "$subcmd" ]]; then
+    export _CLI_CMD_PATH="${_CLI_CMD_PATH:-$(basename "$0")} $cmd"
     exec "$subcmd" "$@"
   fi
   return 1
+}
+
+# List subcommands by scanning executable scripts with a given prefix.
+# Extracts name (sans prefix) and description (line 2 comment) from each.
+# Skips nested subcommands when a parent dispatcher exists
+# (e.g. notes-people-add is hidden because notes-people handles it).
+# Usage: cli_list_subcommands <base-dir> <prefix>
+cli_list_subcommands() {
+  local base_dir="$1" prefix="$2"
+  local name desc
+  for cmd in "$base_dir/${prefix}"*; do
+    [[ -x "$cmd" ]] || continue
+    name=$(basename "$cmd")
+    name="${name#$prefix}"
+    # Skip nested: notes-people-add is nested if notes-people is a dispatcher.
+    # Only skip when the parent uses --dispatch (is a real dispatcher, not a leaf command).
+    if [[ "$name" == *-* ]]; then
+      local parent="${name%%-*}"
+      local parent_file="$base_dir/${prefix}${parent}"
+      [[ -x "$parent_file" ]] && grep -q -- '--dispatch' "$parent_file" && continue
+    fi
+    desc=$(sed -n '2s/^# *//p' "$cmd")
+    # Show + suffix when the command is itself a dispatcher (has subcommands)
+    local suffix=""
+    grep -q -- '--dispatch' "$cmd" && suffix="+"
+    printf "  %-20s %s\n" "$name$suffix" "$desc"
+  done
+}
+
+# Resolve script path, following symlinks.
+# Accepts basenames, relative paths, and absolute paths.
+# Usage: path=$(cli_resolve_script_path)
+cli_resolve_script_path() {
+  local source="${1:-${BASH_SOURCE[1]}}"
+  local target=""
+
+  [[ "$source" == */* ]] || source="$(command -v -- "$source")"
+  [[ "$source" == /* ]] || source="$PWD/$source"
+
+  while [[ -L "$source" ]]; do
+    target="$(readlink "$source")"
+    if [[ "$target" == /* ]]; then
+      source="$target"
+    else
+      source="${source%/*}/$target"
+    fi
+  done
+
+  printf '%s\n' "$source"
+}
+
+# Resolve script directory, following symlinks.
+# Usage: dir=$(cli_resolve_script_dir)
+cli_resolve_script_dir() {
+  local source
+  source="$(cli_resolve_script_path "${1:-${BASH_SOURCE[1]}}")" || return 1
+  printf '%s\n' "${source%/*}"
 }
 
 # Return success when arg matches YYYY-MM-DD.
@@ -90,3 +129,157 @@ cli_is_date() {
   local value="${1:-}"
   [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
 }
+
+# --- fzf helpers ---
+#
+# Two pickers for different use cases:
+#
+#   cli_fzf_pick   Simple lists passed as args. For short, known option sets
+#                  (categories, actions, sections). Supports --new for creation.
+#                  Example: cli_fzf_pick "Move to?" "${categories[@]}"
+#
+#   cli_fzf_multi  Entity pickers from stdin. For dynamic, tab-delimited data
+#                  (people, meetings, todos) with metadata and preview support.
+#                  Works for single-select too — --multi enables but doesn't require.
+#                  Example: printf '%s\n' "${entries[@]}" | cli_fzf_multi "Pick" --preview "cat {2}"
+
+# Require fzf or exit with error.
+cli_require_fzf() {
+  command -v fzf &>/dev/null || { echo "Error: fzf is required for interactive mode" >&2; exit 1; }
+}
+
+# Pick from a short list of known options (args, not stdin).
+# Appends "+ New..." option when --new is passed; returns literal "+ New..." if chosen.
+# Usage: cli_fzf_pick [--new] <header> <item1> <item2> ...
+# Returns: selected item on stdout, exits 0. Empty/cancel exits 1.
+cli_fzf_pick() {
+  cli_require_fzf
+  local allow_new=false
+  if [[ "${1:-}" == "--new" ]]; then
+    allow_new=true; shift
+  fi
+  local header="$1"; shift
+  local items=()
+  [[ $# -gt 0 ]] && items=("$@")
+
+  $allow_new && items+=("+ New...")
+  [[ ${#items[@]} -eq 0 ]] && return 1
+
+  local selected
+  selected=$(printf '%s\n' "${items[@]}" | fzf --header="$header") || return 1
+  [[ -z "$selected" ]] && return 1
+  echo "$selected"
+}
+
+# Prompt user for a new name (used after cli_fzf_pick returns "+ New...").
+# Usage: cli_fzf_new_input <prompt>
+cli_fzf_new_input() {
+  local prompt="${1:-Name}"
+  local value
+  printf '%s: ' "$prompt" >&2
+  read -r value
+  [[ -z "$value" ]] && return 1
+  echo "$value"
+}
+
+# Pick from dynamic, tab-delimited entries via fzf (reads from stdin).
+# Format: "display_text\tmetadata1\tmetadata2..."
+# Shows only the first field (--with-nth=1), returns full selected lines.
+# Works for single-select too — TAB enables multi, ENTER confirms.
+# Usage: printf '%s\n' "${entries[@]}" | cli_fzf_multi <header> [--preview <cmd>] [--prompt <label>]
+# Returns: selected lines on stdout (tab-delimited), exits 0. Cancel exits 1.
+cli_fzf_multi() {
+  cli_require_fzf
+  local header="$1"; shift
+  local extra_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --preview) shift; extra_args+=(--preview "$1" --preview-window "right:40%:wrap"); shift ;;
+      --prompt) shift; extra_args+=(--prompt "$1"); shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local selected
+  selected=$(fzf --multi \
+      --delimiter=$'\t' \
+      --with-nth=1 \
+      --header="$header" \
+      ${extra_args[@]+"${extra_args[@]}"}) || return 1  # bash 3.2 + set -u: guard empty array
+  [[ -z "$selected" ]] && return 1
+  echo "$selected"
+}
+
+# --- Auto-help (source-time) ---
+# Capture caller and define usage(). Flags parsed before "$@":
+#
+#   source lib-cli.bash --auto-help "$@"
+#     → defines usage(), checks --help
+#
+#   source lib-cli.bash --auto-help --dispatch -- "$@"
+#     → same + usage() auto-appends COMMANDS from discovered subcommands
+#     → prefix defaults to "basename-" (e.g. notes-people → notes-people-)
+#
+#   source lib-cli.bash --auto-help --dispatch "custom-prefix-" -- "$@"
+#     → same but with explicit prefix override
+#
+#   source lib-cli.bash --auto-help --deferred "$@"
+#     → defines usage() but does NOT check --help at source time
+#     → script handles --help itself after setup (e.g. pipeline scripts
+#       that need STEPS defined before showing help)
+#
+# Scripts can override usage() after sourcing if they need custom behavior.
+_CLI_SCRIPT="${BASH_SOURCE[1]}"
+_CLI_SUBCMD_DIR=""
+_CLI_SUBCMD_PREFIX=""
+
+# Print the comment-header block from the caller script to stdout.
+# Auto-prepends _CLI_CMD_PATH to USAGE lines. Does NOT exit.
+cli_print_usage_header() {
+  local cmd_path="${_CLI_CMD_PATH:-}"
+  awk -v cmd="$cmd_path" '
+    NR>1 && /^$/{exit}
+    NR>1 {
+      sub(/^# /, ""); sub(/^#/, "")
+      # Auto-prepend command path to USAGE line when args start with non-alpha
+      # (e.g. "[options]", "<command>"). Skips lines with hardcoded names for compat.
+      if (cmd != "" && /^USAGE:/) {
+        rest = $0; sub(/^USAGE: */, "", rest)
+        if (rest == "" || rest ~ /^[^a-zA-Z]/) {
+          sub(/^USAGE: */, "USAGE: " cmd " ")
+        }
+      }
+      print
+    }
+  ' "$_CLI_SCRIPT"
+}
+
+usage() {
+  cli_print_usage_header
+  if [[ -n "$_CLI_SUBCMD_DIR" && -n "$_CLI_SUBCMD_PREFIX" ]]; then
+    echo ""
+    echo "COMMANDS:"
+    cli_list_subcommands "$_CLI_SUBCMD_DIR" "$_CLI_SUBCMD_PREFIX"
+  fi
+  exit "${1:-1}"
+}
+
+if [[ "${1:-}" == "--auto-help" ]]; then
+  shift
+  export _CLI_CMD_PATH="${_CLI_CMD_PATH:-$(basename "$_CLI_SCRIPT")}"
+  _cli_deferred=false
+  if [[ "${1:-}" == "--dispatch" ]]; then
+    shift
+    _CLI_SUBCMD_DIR="$(cd "$(dirname "$_CLI_SCRIPT")" && pwd)"
+    if [[ "${1:-}" != "--" && "${1:-}" != --* && -n "${1:-}" ]]; then
+      _CLI_SUBCMD_PREFIX="$1"; shift
+    else
+      _CLI_SUBCMD_PREFIX="$(basename "$_CLI_SCRIPT")-"
+    fi
+  fi
+  [[ "${1:-}" == "--deferred" ]] && { _cli_deferred=true; shift; }
+  [[ "${1:-}" == "--" ]] && shift || true
+  if [[ "$_cli_deferred" == false ]]; then
+    cli_is_help "${1:-}" && usage 0 || true
+  fi
+fi

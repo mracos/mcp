@@ -1,0 +1,12 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  bats:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: brew install jq
+      - run: npm ci || npm install
+      - run: PROJECT_ROOT=$PWD npx bats -r test

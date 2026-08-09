@@ -3,8 +3,8 @@
 # USAGE: mcp edit
 
 set -euo pipefail
-SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib-cli.bash" --auto "$@"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+source "$SCRIPT_DIR/lib-cli.bash" --auto-help "$@"
 source "$SCRIPT_DIR/lib-mcp.bash"
 
 ensure_file

@@ -19,17 +19,15 @@
 
 set -euo pipefail
 
-# Resolve symlinks to find real script location
-SOURCE="${BASH_SOURCE[0]}"
-while [[ -L "$SOURCE" ]]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+SOURCE="$(realpath "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="${SOURCE%/*}"
+REPO_ROOT="${SCRIPT_DIR%/bin}"
 LIB_DIR="$REPO_ROOT/lib"
-source "$LIB_DIR/lib-cli.bash"
+source "$REPO_ROOT/lib/lib-cli.bash"
+
+# Override dispatch dir (script is in bin/, subcommands in lib/)
+_CLI_SUBCMD_DIR="$LIB_DIR"
+_CLI_SUBCMD_PREFIX="mcp-"
 
 cmd="${1:-}"
 cli_is_help "$cmd" && usage 0

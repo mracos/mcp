@@ -14,7 +14,7 @@
 
 MCP_BACKEND="${MCP_BACKEND:-pm2}"
 
-_backend_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_backend_dir="${BASH_SOURCE[0]%/*}"
 _backend_lib="$_backend_dir/lib-backend-${MCP_BACKEND}.bash"
 
 if [[ ! -f "$_backend_lib" ]]; then

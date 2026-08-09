@@ -147,4 +147,4 @@ sync_codex_config() {
 # Backend dispatch (must come after require_jq/ensure_file are defined; backend
 # implementations rely on them).
 # shellcheck source=/dev/null
-source "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-backend.bash"
+source "${BASH_SOURCE[0]%/*}/lib-backend.bash"
