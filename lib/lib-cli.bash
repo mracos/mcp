@@ -17,12 +17,20 @@
 # In-place sed that works on both GNU and BSD sed. `sed -i ''` (BSD idiom)
 # makes GNU read '' as an empty script and the real script as a filename;
 # `sed -i` (GNU idiom) makes BSD eat the next arg as the backup suffix.
-# Sidestep both by dropping -i: run sed to a temp file and move it back.
+# Sidestep both by dropping -i: run sed to a temp file and copy it back.
 # The last argument is the file; everything before it is the sed script/flags.
+#
+# Copy the result back into the original file (truncate + write) rather than
+# `mv`-ing the temp over it: `mv` would replace the inode and hand the file the
+# temp's 0600 mode, stripping perms like the execute bit. Real `sed -i` (BSD
+# and GNU) preserves the file mode, so we do too.
 sed_i() {
   local _n=$# _f="${@: -1}" _t
   _t="$(mktemp)"
-  sed "${@:1:$((_n - 1))}" "$_f" > "$_t" && mv "$_t" "$_f"
+  if sed "${@:1:$((_n - 1))}" "$_f" > "$_t"; then
+    cat "$_t" > "$_f"
+  fi
+  rm -f "$_t"
 }
 
 # Reformat a date string, portable across BSD and GNU date. BSD needs the
