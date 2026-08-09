@@ -9,4 +9,4 @@ jobs:
         with: { node-version: '20' }
       - run: brew install jq
       - run: npm ci || npm install
-      - run: PROJECT_ROOT=$PWD npx bats -r test
+      - run: npm test
