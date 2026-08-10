@@ -9,7 +9,7 @@ _pm2_ecosystem_path() {
 }
 
 _pm2_generate_ecosystem() {
-  require_jq
+  cli_require_jq
   ensure_file
   mkdir -p "$DAEMON_DIR"
 

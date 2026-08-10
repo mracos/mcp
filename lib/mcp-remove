@@ -23,7 +23,7 @@ done
 
 [[ -z "$name" ]] && { echo "Error: missing server name"; exit 1; }
 
-require_jq
+cli_require_jq
 ensure_file
 
 if ! jq -e ".\"$name\"" "$MCP_FILE" >/dev/null 2>&1; then

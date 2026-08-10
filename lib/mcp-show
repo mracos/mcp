@@ -10,6 +10,6 @@ source "$SCRIPT_DIR/lib-mcp.bash"
 name="${1:-}"
 [[ -z "$name" ]] && usage
 
-require_jq
+cli_require_jq
 ensure_file
 jq -e ".\"$name\"" "$MCP_FILE" || { echo "Server '$name' not found"; exit 1; }

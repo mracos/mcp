@@ -8,10 +8,6 @@ DAEMON_DIR="${DAEMON_DIR:-$HOME/.local/share/mcp}"
 CODEX_MCP_BEGIN="# BEGIN managed by mcp"
 CODEX_MCP_END="# END managed by mcp"
 
-require_jq() {
-  command -v jq &>/dev/null || { echo "Error: jq is required"; exit 1; }
-}
-
 ensure_file() {
   [[ -f "$MCP_FILE" ]] || echo '{}' > "$MCP_FILE"
 }
@@ -64,7 +60,7 @@ get_expected_config() {
 }
 
 build_codex_mcp_block() {
-  require_jq
+  cli_require_jq
   ensure_file
 
   jq -r '
@@ -144,7 +140,7 @@ sync_codex_config() {
   rm -f "$existing" "$managed"
 }
 
-# Backend dispatch (must come after require_jq/ensure_file are defined; backend
+# Backend dispatch (must come after ensure_file is defined; backend
 # implementations rely on them).
 # shellcheck source=/dev/null
 source "${BASH_SOURCE[0]%/*}/lib-backend.bash"

@@ -192,6 +192,11 @@ cli_require_fzf() {
   command -v fzf &>/dev/null || { echo "Error: fzf is required for interactive mode" >&2; exit 1; }
 }
 
+# Require jq or exit with error.
+cli_require_jq() {
+  command -v jq &>/dev/null || { echo "Error: jq is required" >&2; exit 1; }
+}
+
 # Pick from a short list of known options (args, not stdin).
 # Appends "+ New..." option when --new is passed; returns literal "+ New..." if chosen.
 # Usage: cli_fzf_pick [--new] <header> <item1> <item2> ...
@@ -314,7 +319,7 @@ if [[ "${1:-}" == "--auto-help" ]]; then
   _cli_deferred=false
   if [[ "${1:-}" == "--dispatch" ]]; then
     shift
-    _CLI_SUBCMD_DIR="$(cd "$(dirname "$_CLI_SCRIPT")" && pwd)"
+    _CLI_SUBCMD_DIR="$(cli_resolve_script_dir "$_CLI_SCRIPT")"
     if [[ "${1:-}" != "--" && "${1:-}" != --* && -n "${1:-}" ]]; then
       _CLI_SUBCMD_PREFIX="$1"; shift
     else

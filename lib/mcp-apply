@@ -7,7 +7,7 @@ SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 source "$SCRIPT_DIR/lib-cli.bash" --auto-help "$@"
 source "$SCRIPT_DIR/lib-mcp.bash"
 
-require_jq
+cli_require_jq
 ensure_file
 
 [[ ! -f "$CLAUDE_JSON" ]] && echo '{}' > "$CLAUDE_JSON"

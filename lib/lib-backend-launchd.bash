@@ -59,7 +59,7 @@ _launchd_set_log_paths() {
 }
 
 backend_apply() {
-  require_jq
+  cli_require_jq
   ensure_file
   mkdir -p "$LAUNCHER_DIR"
 
