@@ -283,13 +283,20 @@ _CLI_SUBCMD_DIR=""
 _CLI_SUBCMD_PREFIX=""
 
 # Print the comment-header block from the caller script to stdout.
-# Auto-prepends _CLI_CMD_PATH to USAGE lines. Does NOT exit.
+# Auto-prepends _CLI_CMD_PATH to USAGE lines. Skips COMPLETE: blocks (they
+# drive zsh completions, not humans). Does NOT exit.
 cli_print_usage_header() {
   local cmd_path="${_CLI_CMD_PATH:-}"
   awk -v cmd="$cmd_path" '
     NR>1 && /^$/{exit}
     NR>1 {
       sub(/^# /, ""); sub(/^#/, "")
+      if ($0 == "COMPLETE:") { skip = 1; next }
+      if (skip) {
+        if ($0 ~ /^  /) next
+        skip = 0
+        if ($0 == "") next
+      }
       # Auto-prepend command path to USAGE line when args start with non-alpha
       # (e.g. "[options]", "<command>"). Skips lines with hardcoded names for compat.
       if (cmd != "" && /^USAGE:/) {

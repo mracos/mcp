@@ -2,6 +2,9 @@
 # Remove an MCP server
 # USAGE: mcp remove <name>
 #
+# COMPLETE:
+#   1 _mcp_server_names
+#
 # FLAGS:
 #   --no-apply    Skip auto-apply after remove
 

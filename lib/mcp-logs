@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Tail daemon logs
 # USAGE: mcp logs [name]
+#
+# COMPLETE:
+#   1 _mcp_server_names
 
 set -euo pipefail
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"

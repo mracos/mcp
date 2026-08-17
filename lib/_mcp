@@ -1,0 +1,11 @@
+# Zsh completion helpers for mcp CLI
+# Auto-sourced by the completions plugin when COMPLETE references these functions
+
+_mcp_server_names() {
+  local -a names=()
+  local n
+  while IFS= read -r n; do
+    [[ -n "$n" ]] && names+=("$n")
+  done < <(jq -r 'keys[]' "${MCP_FILE:-$HOME/.mcp-servers.json}" 2>/dev/null)
+  (( ${#names} )) && _describe 'server' names
+}
