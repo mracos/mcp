@@ -92,19 +92,31 @@ cli_usage_until_blank() {
   exit "$code"
 }
 
+# Find a subcommand file across a colon-separated dir list. First match wins.
+# Usage: _cli_find_subcmd <dirs> <filename>
+_cli_find_subcmd() {
+  local dirs="$1" name="$2" dir
+  local IFS=:
+  for dir in $dirs; do
+    [[ -n "$dir" && -x "$dir/$name" ]] && { printf '%s/%s\n' "$dir" "$name"; return 0; }
+  done
+  return 1
+}
+
 # Exec subcommand script if it exists/executable.
 # Callers pass raw "$@" (unshifted) - the function safely consumes the cmd.
-# Usage: cli_exec_subcommand <base-dir> <prefix> <cmd> "$@"
+# <base-dirs> may be a single dir or a colon-separated list (first match wins).
+# Usage: cli_exec_subcommand <base-dirs> <prefix> <cmd> "$@"
 # Example: cli_exec_subcommand "$SCRIPT_DIR" "notes-daily-" "$cmd" "$@"
 cli_exec_subcommand() {
-  local base_dir="$1"
+  local base_dirs="$1"
   local prefix="$2"
   local cmd="$3"
   shift 3
   [[ $# -gt 0 ]] && shift
 
-  local subcmd="$base_dir/${prefix}${cmd}"
-  if [[ -x "$subcmd" ]]; then
+  local subcmd
+  if subcmd="$(_cli_find_subcmd "$base_dirs" "${prefix}${cmd}")"; then
     export _CLI_CMD_PATH="${_CLI_CMD_PATH:-$(basename "$0")} $cmd"
     exec "$subcmd" "$@"
   fi
@@ -115,27 +127,43 @@ cli_exec_subcommand() {
 # Extracts name (sans prefix) and description (line 2 comment) from each.
 # Skips nested subcommands when a parent dispatcher exists
 # (e.g. notes-people-add is hidden because notes-people handles it).
-# Usage: cli_list_subcommands <base-dir> <prefix>
+# <base-dirs> may be a single dir or a colon-separated list: entries are
+# aggregated sorted by name, duplicates resolve to the first dir (matching
+# cli_exec_subcommand), and the parent lookup spans the whole list.
+# Usage: cli_list_subcommands <base-dirs> <prefix>
 cli_list_subcommands() {
-  local base_dir="$1" prefix="$2"
-  local name desc
-  for cmd in "$base_dir/${prefix}"*; do
-    [[ -x "$cmd" ]] || continue
-    name=$(basename "$cmd")
-    name="${name#$prefix}"
-    # Skip nested: notes-people-add is nested if notes-people is a dispatcher.
-    # Only skip when the parent uses --dispatch (is a real dispatcher, not a leaf command).
-    if [[ "$name" == *-* ]]; then
-      local parent="${name%%-*}"
-      local parent_file="$base_dir/${prefix}${parent}"
-      [[ -x "$parent_file" ]] && grep -q -- '--dispatch' "$parent_file" && continue
-    fi
-    desc=$(sed -n '2s/^# *//p' "$cmd")
-    # Show + suffix when the command is itself a dispatcher (has subcommands)
-    local suffix=""
-    grep -q -- '--dispatch' "$cmd" && suffix="+"
-    printf "  %-20s %s\n" "$name$suffix" "$desc"
+  local base_dirs="$1" prefix="$2"
+  local dir cmd name desc suffix parent parent_file
+  local seen=" " lines=""
+  local IFS=:
+  for dir in $base_dirs; do
+    [[ -n "$dir" ]] || continue
+    for cmd in "$dir/${prefix}"*; do
+      [[ -x "$cmd" ]] || continue
+      name="${cmd##*/}"
+      name="${name#$prefix}"
+      [[ "$seen" == *" $name "* ]] && continue
+      seen="$seen$name "
+      # Skip nested: notes-people-add is nested if notes-people is a dispatcher.
+      # Only skip when the parent uses --dispatch (is a real dispatcher, not a leaf command).
+      if [[ "$name" == *-* ]]; then
+        parent="${name%%-*}"
+        if parent_file="$(_cli_find_subcmd "$base_dirs" "${prefix}${parent}")"; then
+          grep -q -- '--dispatch' "$parent_file" && continue
+        fi
+      fi
+      desc=$(sed -n '2s/^# *//p' "$cmd")
+      # Show + suffix when the command is itself a dispatcher (has subcommands)
+      suffix=""
+      grep -q -- '--dispatch' "$cmd" && suffix="+"
+      lines="${lines}${name}${suffix}"$'\t'"${desc}"$'\n'
+    done
   done
+  [[ -n "$lines" ]] || return 0
+  printf '%s' "$lines" | LC_ALL=C sort -t "$(printf '\t')" -k1,1 |
+    while IFS=$'\t' read -r name desc; do
+      printf "  %-20s %s\n" "$name" "$desc"
+    done
 }
 
 # Resolve script path, following symlinks.
@@ -268,6 +296,8 @@ cli_fzf_multi() {
 #   source lib-cli.bash --auto-help --dispatch -- "$@"
 #     → same + usage() auto-appends COMMANDS from discovered subcommands
 #     → prefix defaults to "basename-" (e.g. notes-people → notes-people-)
+#     → dispatchers may override _CLI_SUBCMD_DIR after sourcing; it accepts a
+#       colon-separated dir list (searched in order, like PATH)
 #
 #   source lib-cli.bash --auto-help --dispatch "custom-prefix-" -- "$@"
 #     → same but with explicit prefix override
