@@ -597,7 +597,7 @@ EOF
   "test": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@test/mcp"],
+    "args": ["-y", "@test/tools/mcp"],
     "port": 8081
   }
 }
@@ -623,7 +623,7 @@ EOF
   "test": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@test/mcp"],
+    "args": ["-y", "@test/tools/mcp"],
     "port": 8081
   }
 }
@@ -643,7 +643,7 @@ EOF
   "test": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@test/mcp"],
+    "args": ["-y", "@test/tools/mcp"],
     "port": 8081
   }
 }
@@ -653,7 +653,7 @@ EOF
   assert_success
 
   # The inner command after `-- ` should be an absolute path
-  run grep -E "mcp-proxy --port 8081 -- /[^ ]+/npx -y @test/mcp" "$DAEMON_DIR/ecosystem.config.js"
+  run grep -E "mcp-proxy --port 8081 -- /[^ ]+/npx -y @test/tools/mcp" "$DAEMON_DIR/ecosystem.config.js"
   assert_success
 }
 
@@ -663,7 +663,7 @@ EOF
   "test": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@test/mcp"],
+    "args": ["-y", "@test/tools/mcp"],
     "port": 8081
   }
 }
@@ -683,7 +683,7 @@ EOF
   "test": {
     "type": "stdio-http-proxy",
     "command": "npx",
-    "args": ["-y", "@test/mcp"],
+    "args": ["-y", "@test/tools/mcp"],
     "port": 8081,
     "env": {
       "MY_TOKEN": "abc123"
