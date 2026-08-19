@@ -56,7 +56,18 @@ echo "mock: npx $*" # non-pm2 npx calls (shouldn't happen in mcp)
 MOCK
   chmod +x "$MOCK_BIN/npx"
 
-  export PATH="$MOCK_BIN:$PATH"
+  # Stub other runners referenced by fixtures so resolve_command finds them
+  # without reaching outside the test PATH
+  ln -s "$MOCK_BIN/npx" "$MOCK_BIN/bunx"
+
+  # Strip mise shims from PATH: tests must never invoke mise. A shim run
+  # under the fake HOME sees empty mise dirs and re-resolves every
+  # npm-backed "latest" tool via `npm view`; npm is itself a shim, so the
+  # lookups recurse into a fork bomb (4k processes froze the machine on
+  # 2026-08-18). jq/envsubst resolve from system dirs instead.
+  local clean_path
+  clean_path=$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /mise\/shims/' | sed 's/:$//')
+  export PATH="$MOCK_BIN:$clean_path"
 }
 
 teardown() {
@@ -698,6 +709,54 @@ EOF
   run cat "$DAEMON_DIR/ecosystem.config.js"
   assert_output --partial '"MY_TOKEN":"abc123"'
   assert_output --partial '"PATH":'
+}
+
+@test "ecosystem skips server whose command cannot be resolved" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "good": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081
+  },
+  "bad": {
+    "type": "stdio-http-proxy",
+    "command": "definitely-missing-cmd-xyz",
+    "args": ["mcp"],
+    "port": 8083
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+  assert_output --partial "command 'definitely-missing-cmd-xyz' for server 'bad' not found"
+
+  run cat "$DAEMON_DIR/ecosystem.config.js"
+  assert_output --partial "mcp-good"
+  refute_output --partial "mcp-bad"
+}
+
+@test "ecosystem bounds restarts (no backoff that outruns pm2's unstable-restart window)" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "test": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/mcp"],
+    "port": 8081
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon start
+  assert_success
+
+  run cat "$DAEMON_DIR/ecosystem.config.js"
+  assert_output --partial "max_restarts"
+  refute_output --partial "exp_backoff_restart_delay"
+  refute_output --partial "restart_delay"
 }
 
 # launchd backend tests

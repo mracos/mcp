@@ -34,7 +34,11 @@ _pm2_generate_ecosystem() {
 
     port=$(jq -r ".\"$server\".port" "$MCP_FILE")
     cmd=$(jq -r ".\"$server\".command" "$MCP_FILE")
-    cmd_abs=$(resolve_command "$cmd") || true
+    if ! cmd_abs=$(resolve_command "$cmd"); then
+      echo "Warning: command '$cmd' for server '$server' not found in PATH or known bin dirs; skipping." >&2
+      echo "         Install it (or fix the entry) and re-run 'mcp daemon start'." >&2
+      continue
+    fi
     args_str=$(jq -r ".\"$server\".args | join(\" \")" "$MCP_FILE")
 
     local proxy_args="mcp-proxy --port $port -- $cmd_abs $args_str"
@@ -45,6 +49,10 @@ _pm2_generate_ecosystem() {
     $first || echo "," >> "$ecosystem"
     first=false
 
+    # No restart_delay/exp_backoff: pm2 only counts a crash toward
+    # max_restarts during the first min_uptime*max_restarts ms of the app's
+    # life, so any delay lets a crash loop outrun the window and restart
+    # forever (nteract looped 244k times over 3 months this way).
     cat >> "$ecosystem" << EOF
     {
       name: 'mcp-$server',
@@ -52,9 +60,7 @@ _pm2_generate_ecosystem() {
       args: '$proxy_args',
       env: $env_json,
       max_restarts: 10,
-      min_uptime: 5000,
-      restart_delay: 1000,
-      exp_backoff_restart_delay: 500
+      min_uptime: 5000
     }
 EOF
   done < <(jq -r 'keys[]' "$MCP_FILE")

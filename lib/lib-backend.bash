@@ -44,6 +44,8 @@ resolve_command() {
   for dir in \
     "$HOME/.local/share/mise/shims" \
     "$HOME/.bun/bin" \
+    "$HOME/bin" \
+    "$HOME/.local/bin" \
     "/opt/homebrew/bin" \
     "/usr/local/bin" \
     "/usr/bin"; do
@@ -64,6 +66,7 @@ backend_env_path() {
   local extras=(
     "$HOME/.local/share/mise/shims"
     "$HOME/.bun/bin"
+    "$HOME/bin"
     "$HOME/.local/bin"
     "/opt/homebrew/bin"
     "/usr/local/bin"

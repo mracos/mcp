@@ -69,6 +69,14 @@ backend_apply() {
     type=$(jq -r ".\"$server\".type" "$MCP_FILE")
     [[ "$type" != "stdio-http-proxy" ]] && continue
 
+    local server_cmd
+    server_cmd=$(jq -r ".\"$server\".command" "$MCP_FILE")
+    if ! resolve_command "$server_cmd" >/dev/null; then
+      echo "Warning: command '$server_cmd' for server '$server' not found in PATH or known bin dirs; skipping." >&2
+      echo "         Install it (or fix the entry) and re-run 'mcp daemon start'." >&2
+      continue
+    fi
+
     local cmd
     cmd=$(_launchd_command_for "$server")
     launcher new -d "$LAUNCHER_DIR" "$server" "$cmd" >/dev/null
