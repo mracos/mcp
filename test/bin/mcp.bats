@@ -831,7 +831,7 @@ EOF
   run cat "$HOME/.mock-launcher-log"
   assert_output --partial "launcher new"
   assert_output --partial "granola"
-  assert_output --partial "launcher link --all"
+  refute_output --partial "launcher link"
   assert_output --partial "launcher load --all"
 }
 
@@ -853,7 +853,7 @@ EOF
   run "$MCP_CLI" daemon start
   assert_success
 
-  plist="$DAEMON_DIR/mcp.granola.plist"
+  plist="$TEST_HOME/Library/LaunchAgents/mcp.granola.plist"
   assert [ -f "$plist" ]
 
   run cat "$plist"

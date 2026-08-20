@@ -10,9 +10,10 @@ fi
 
 # Scope launcher operations to mcp's domain. These exports are inherited by
 # every launcher subprocess we spawn but do not leak outside this bash process.
+# Plists live directly in ~/Library/LaunchAgents (launcher's single-dir model,
+# ADR launcher/0002); the mcp.* prefix keeps them apart from everything else.
 export LAUNCHER_PREFIX="${MCP_LAUNCHD_PREFIX:-mcp}"
-export LAUNCHER_DIR="${MCP_LAUNCHD_DIR:-$DAEMON_DIR}"
-export LAUNCHER_INSTALL_DIR="${MCP_LAUNCHD_INSTALL_DIR:-$HOME/Library/LaunchAgents}"
+export LAUNCHER_DIR="${MCP_LAUNCHD_DIR:-$HOME/Library/LaunchAgents}"
 
 _launchd_log_dir() {
   echo "$DAEMON_DIR/logs"
@@ -82,8 +83,6 @@ backend_apply() {
     launcher new -d "$LAUNCHER_DIR" "$server" "$cmd" >/dev/null
     _launchd_set_log_paths "$server"
   done < <(jq -r 'keys[]' "$MCP_FILE")
-
-  launcher link --all >/dev/null 2>&1 || true
 }
 
 backend_start() {
@@ -108,7 +107,6 @@ backend_stop() {
 backend_delete() {
   local name="$1"
   launcher unload "$name" 2>/dev/null || true
-  launcher unlink "$name" 2>/dev/null || true
   launcher rm "$name" 2>/dev/null || true
 }
 
