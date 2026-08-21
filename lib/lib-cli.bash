@@ -56,6 +56,22 @@ date_shift() {
   fi
 }
 
+# Whole days from <from> to <to>, both YYYY-MM-DD. Negative when <to> is
+# earlier. Rounds to the nearest day so a DST transition inside the range
+# (a 23h or 25h day) can't shave one off.
+# Usage: date_days_between <from> <to>
+date_days_between() {
+  local _f _t
+  _f=$(date_reformat "%Y-%m-%d" "$1" +%s 2>/dev/null) || return 1
+  _t=$(date_reformat "%Y-%m-%d" "$2" +%s 2>/dev/null) || return 1
+  local _d=$((_t - _f))
+  if [[ "$_d" -lt 0 ]]; then
+    echo $(( -(( -_d + 43200 ) / 86400) ))
+  else
+    echo $(( (_d + 43200) / 86400 ))
+  fi
+}
+
 # --- Dispatch helpers ---
 
 # Return success if token is a standard help flag.
