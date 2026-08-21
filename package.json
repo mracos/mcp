@@ -4,7 +4,7 @@
   "bin": { "mcp": "./bin/mcp" },
   "license": "MIT",
   "scripts": {
-    "test": "PROJECT_ROOT=$PWD bats -r test"
+    "test": "PROJECT_ROOT=$PWD BATS_TEST_TIMEOUT=${BATS_TEST_TIMEOUT:-120} bats -r test"
   },
   "devDependencies": {
     "bats": "^1.11.0",
