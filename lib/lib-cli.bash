@@ -72,6 +72,46 @@ date_days_between() {
   fi
 }
 
+# --- Deadline ---
+
+# A wall clock for a whole command, distinct from any per-call timeout.
+#
+# A timeout bounds one subprocess, which is the wrong shape for the failure it
+# needs to catch: a run can spin in the shell itself, with no child alive and
+# nothing to time out, and burn a core until someone notices. That is not
+# hypothetical: one run did exactly that for twelve hours. Callers check the
+# predicate at loop boundaries, so an overrunning run stops taking on new work
+# and still applies whatever already finished.
+#
+# CLI_DEADLINE is in seconds; 0 disables it. A tool maps its own env name onto
+# this one the way it maps JOBS_DEFAULT_LIMIT.
+: "${CLI_DEADLINE:=0}"
+_CLI_DEADLINE_AT=0
+
+cli_deadline_start() {
+  [[ -n "${1:-}" ]] && CLI_DEADLINE="$1"
+  SECONDS=0
+  if [[ "$CLI_DEADLINE" -gt 0 ]] 2> /dev/null; then
+    _CLI_DEADLINE_AT="$CLI_DEADLINE"
+  else
+    _CLI_DEADLINE_AT=0
+  fi
+}
+
+cli_past_deadline() {
+  [[ "$_CLI_DEADLINE_AT" -gt 0 ]] || return 1
+  [[ "$SECONDS" -ge "$_CLI_DEADLINE_AT" ]]
+}
+
+# Seconds left, or empty when no deadline is set. Lets a caller hand the
+# remainder to a per-call timeout instead of letting one call outlive the run.
+cli_deadline_remaining() {
+  [[ "$_CLI_DEADLINE_AT" -gt 0 ]] || return 1
+  local left=$((_CLI_DEADLINE_AT - SECONDS))
+  [[ "$left" -lt 0 ]] && left=0
+  printf '%s\n' "$left"
+}
+
 # --- Dispatch helpers ---
 
 # Return success if token is a standard help flag.
