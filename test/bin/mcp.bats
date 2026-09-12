@@ -252,7 +252,7 @@ teardown() {
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -278,7 +278,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -362,6 +362,58 @@ EOF
   assert_output --partial "mock: pm2 list"
 }
 
+@test "mcp daemon restart deletes registrations so a changed port takes effect" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "alpha": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/alpha"],
+    "port": 47101
+  },
+  "remote": {
+    "type": "http",
+    "url": "https://example.com/mcp"
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon restart
+  assert_success
+
+  run cat "$HOME/.mock-pm2-log"
+  assert_output --partial "pm2 delete mcp-alpha"
+  refute_output --partial "mcp-remote"
+  assert_output --partial "pm2 start"
+}
+
+@test "mcp daemon restart <name> only touches that server" {
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "alpha": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/alpha"],
+    "port": 47101
+  },
+  "beta": {
+    "type": "stdio-http-proxy",
+    "command": "npx",
+    "args": ["-y", "@test/beta"],
+    "port": 47102
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon restart alpha
+  assert_success
+
+  run cat "$HOME/.mock-pm2-log"
+  assert_output --partial "pm2 delete mcp-alpha"
+  refute_output --partial "pm2 delete mcp-beta"
+  assert_output --partial "--only mcp-alpha"
+}
+
 @test "mcp daemon unknown subcommand shows error" {
   run "$MCP_CLI" daemon invalid
   assert_failure
@@ -389,7 +441,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -448,7 +500,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -472,7 +524,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -483,7 +535,7 @@ EOF
 
   run "$MCP_CLI" apply
   assert_success
-  assert_output --partial "myproxy → http://localhost:8081/sse (daemon online)"
+  assert_output --partial "myproxy → http://localhost:47101/sse (daemon online)"
 
   # Should be sse type in claude.json
   run jq -e '.mcpServers.myproxy.type' "$HOME/.claude.json"
@@ -498,7 +550,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@example/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -509,14 +561,14 @@ EOF
 
   run "$MCP_CLI" apply
   assert_success
-  assert_output --partial "myproxy → http://localhost:8081/sse (daemon stopped)"
+  assert_output --partial "myproxy → http://localhost:47101/sse (daemon stopped)"
 
   # Should still be sse type (no fallback)
   run jq -e '.mcpServers.myproxy.type' "$HOME/.claude.json"
   assert_success
   assert_output '"sse"'
 
-  run grep -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  run grep -n '^url = "http://localhost:47101/mcp"$' "$CODEX_CONFIG"
   assert_success
 }
 
@@ -583,7 +635,7 @@ EOF
     "env": {
       "READWISE_TOKEN": "${READWISE_ACCESS_TOKEN}"
     },
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -594,7 +646,7 @@ EOF
 
   run grep -n "^\[mcp_servers\.readwise\]$" "$CODEX_CONFIG"
   assert_success
-  run grep -n '^url = "http://localhost:8081/mcp"$' "$CODEX_CONFIG"
+  run grep -n '^url = "http://localhost:47101/mcp"$' "$CODEX_CONFIG"
   assert_success
   run grep -n "^\[mcp_servers\.readwise\.env\]$" "$CODEX_CONFIG"
   assert_failure
@@ -609,7 +661,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/tools/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -625,7 +677,7 @@ EOF
   assert_output --partial "module.exports"
   assert_output --partial "mcp-test"
   assert_output --partial "mcp-proxy"
-  assert_output --partial "8081"
+  assert_output --partial "47101"
 }
 
 @test "ecosystem uses absolute script path (self-contained npx)" {
@@ -635,7 +687,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/tools/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -655,7 +707,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/tools/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -664,7 +716,7 @@ EOF
   assert_success
 
   # The inner command after `-- ` should be an absolute path
-  run grep -E "mcp-proxy --port 8081 -- /[^ ]+/npx -y @test/tools/mcp" "$DAEMON_DIR/ecosystem.config.js"
+  run grep -E "mcp-proxy --port 47101 -- /[^ ]+/npx -y @test/tools/mcp" "$DAEMON_DIR/ecosystem.config.js"
   assert_success
 }
 
@@ -675,7 +727,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/tools/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -695,7 +747,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/tools/mcp"],
-    "port": 8081,
+    "port": 47101,
     "env": {
       "MY_TOKEN": "abc123"
     }
@@ -718,13 +770,13 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/mcp"],
-    "port": 8081
+    "port": 47101
   },
   "bad": {
     "type": "stdio-http-proxy",
     "command": "definitely-missing-cmd-xyz",
     "args": ["mcp"],
-    "port": 8083
+    "port": 47103
   }
 }
 EOF
@@ -745,7 +797,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "npx",
     "args": ["-y", "@test/mcp"],
-    "port": 8081
+    "port": 47101
   }
 }
 EOF
@@ -820,7 +872,7 @@ MOCK
     "type": "stdio-http-proxy",
     "command": "bunx",
     "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
-    "port": 8083
+    "port": 47103
   }
 }
 EOF
@@ -845,7 +897,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "bunx",
     "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
-    "port": 8083
+    "port": 47103
   }
 }
 EOF
@@ -858,8 +910,31 @@ EOF
 
   run cat "$plist"
   assert_output --partial "/usr/bin/env PATH="
-  assert_output --partial "mcp-proxy --port 8083"
+  assert_output --partial "mcp-proxy --port 47103"
   assert_output --partial "bunx"
+}
+
+@test "MCP_BACKEND=launchd daemon restart removes the job before reloading" {
+  _setup_launchd_mock
+  export MCP_BACKEND=launchd
+
+  cat > "$MCP_FILE" << 'EOF'
+{
+  "granola": {
+    "type": "stdio-http-proxy",
+    "command": "bunx",
+    "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
+    "port": 47103
+  }
+}
+EOF
+
+  run "$MCP_CLI" daemon restart granola
+  assert_success
+
+  run cat "$HOME/.mock-launcher-log"
+  assert_output --partial "launcher rm granola"
+  assert_output --partial "launcher load granola"
 }
 
 @test "MCP_BACKEND=launchd daemon stop calls launcher unload" {
@@ -896,7 +971,7 @@ EOF
     "type": "stdio-http-proxy",
     "command": "bunx",
     "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
-    "port": 8083
+    "port": 47103
   }
 }
 EOF
@@ -908,7 +983,7 @@ EOF
   # info reports "Status: running"
   run "$MCP_CLI" apply
   assert_success
-  assert_output --partial "granola → http://localhost:8083/sse (daemon online)"
+  assert_output --partial "granola → http://localhost:47103/sse (daemon online)"
 }
 
 @test "MCP_BACKEND=launchd unknown backend exits with clear error" {

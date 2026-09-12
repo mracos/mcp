@@ -45,7 +45,7 @@ mcp remove <name>                 # Remove a server
 mcp edit                          # Open in $EDITOR
 mcp apply                         # Sync into clients
 mcp show <name>                   # Show server config
-mcp daemon [start|stop|status]    # Manage proxy daemons
+mcp daemon <cmd> [name]           # start|stop|restart|status daemons
 mcp logs [name]                   # Tail daemon logs
 ```
 
@@ -78,11 +78,11 @@ stdio servers spawn a new process for every Claude Code session - slow startup, 
     "command": "npx",
     "args": ["-y", "@example/mcp"],
     "env": { "API_KEY": "${MY_API_KEY}" },
-    "port": 8081
+    "port": 47101
   }
 ```
 
-Use unique ports per server. `mcp apply` starts daemons automatically and writes SSE endpoints to Claude Code config.
+Ports live in the `471xx` band, one per server (47101, 47102, ...). It steers clear of the usual dev defaults (3000, 8000, 808x) and stays below the macOS ephemeral range (49152+), so a proxy port never collides with a local dev server or an outbound socket. `mcp apply` starts daemons automatically and writes SSE endpoints to Claude Code config.
 
 ### Why SSE instead of HTTP?
 
@@ -124,6 +124,8 @@ Or edit directly with `mcp edit`:
 Existing non-MCP keys in both target files are preserved.
 
 ### Daemon backends
+
+`start` reuses an existing registration, so editing a server's `port`, `command` or `args` needs `mcp daemon restart [name]`: it drops the pm2 app / launchd job first, then recreates it from the current `~/.mcp-servers.json`. Follow with `mcp apply` so clients get the new URL.
 
 `mcp daemon` dispatches to a pluggable backend selected by `MCP_BACKEND`:
 

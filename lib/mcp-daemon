@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Manage MCP proxy daemons
-# USAGE: mcp daemon [start|stop|status|logs] [name]
+# USAGE: mcp daemon [start|stop|restart|status|logs] [name]
 #
 # COMPLETE:
-#   1 start stop status logs
+#   1 start stop restart status logs
 #   2 _mcp_server_names
 
 set -euo pipefail
@@ -25,6 +25,25 @@ case "$subcmd" in
     backend_stop "${1:-}"
     echo
     echo "Run 'mcp apply' to update Claude config to use stdio"
+    ;;
+  restart)
+    # Drop the registration before starting: pm2 and launchd both reuse the
+    # recorded command line of an existing entry, so a changed port or args in
+    # mcp-servers.json never reaches a daemon that a plain start "restarts".
+    cli_require_jq
+    name="${1:-}"
+    if [[ -n "$name" ]]; then
+      backend_delete "$name"
+    else
+      while IFS= read -r server; do
+        [[ -z "$server" ]] && continue
+        [[ "$(jq -r ".\"$server\".type" "$MCP_FILE")" == "stdio-http-proxy" ]] || continue
+        backend_delete "$server"
+      done < <(jq -r 'keys[]' "$MCP_FILE")
+    fi
+    backend_start "$name"
+    echo
+    echo "Run 'mcp apply' to update Claude config to use HTTP endpoints"
     ;;
   status|"")
     backend_status

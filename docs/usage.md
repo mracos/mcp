@@ -48,12 +48,12 @@ After changes, restart Claude Code for new servers to take effect.
     "command": "npx",
     "args": ["-y", "@example/mcp"],
     "env": { "API_KEY": "${MY_API_KEY}" },
-    "port": 8081
+    "port": 47101
   }
 }
 ```
 
-Use unique ports per server (8081, 8082, etc). The proxy handles the stdio↔HTTP translation.
+Ports live in the `471xx` band, one per server (47101, 47102, ...). It steers clear of the usual dev defaults (3000, 8000, 808x) and stays below the macOS ephemeral range (49152+), so a proxy port never collides with a local dev server or an outbound socket. The proxy handles the stdio↔HTTP translation.
 
 ### Why SSE instead of HTTP?
 
@@ -71,6 +71,8 @@ To use `http` type, options are:
 For Codex, proxied servers are written as streamable HTTP URLs (`http://localhost:<port>/mcp`) in `~/.codex/config.toml`.
 
 ## Daemon Backends
+
+`start` reuses an existing registration, so editing a server's `port`, `command` or `args` needs `mcp daemon restart [name]`: it drops the pm2 app / launchd job first, then recreates it from the current `~/.mcp-servers.json`. Follow with `mcp apply` so clients get the new URL.
 
 `mcp daemon` is backend-agnostic. Select with `MCP_BACKEND`:
 
@@ -110,7 +112,7 @@ Tokens are stored in 1Password and loaded via `op://` refs in `env.tpl`.
       "SLACK_TOKEN": "${SLACK_MCP_XOXC_TOKEN}",
       "SLACK_COOKIE": "${SLACK_MCP_XOXD_TOKEN}"
     },
-    "port": 8082
+    "port": 47102
   }
 }
 ```
@@ -123,6 +125,6 @@ Then `mcp apply` to start the daemon. The `${...}` env vars are resolved via `en
 slack-chrome-tokens refresh
 ```
 
-Extracts fresh tokens from Chrome, saves to 1Password, refreshes op cache. Restart the daemon with `mcp daemon stop slack && mcp daemon start slack` to pick up new env vars.
+Extracts fresh tokens from Chrome, saves to 1Password, refreshes op cache. Restart the daemon with `mcp daemon restart slack` to pick up new env vars.
 
 If 1Password is unavailable, falls back to printing tokens for manual use.

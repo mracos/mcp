@@ -10,7 +10,7 @@
     "env": {
       "READWISE_TOKEN": "${READWISE_ACCESS_TOKEN}"
     },
-    "port": 8081
+    "port": 47101
   },
   "linear-server": {
     "type": "http",
@@ -20,6 +20,6 @@
     "type": "stdio-http-proxy",
     "command": "bunx",
     "args": ["--bun", "github:btn0s/granola-mcp/src/index.ts"],
-    "port": 8083
+    "port": 47103
   }
 }
