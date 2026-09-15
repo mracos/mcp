@@ -53,7 +53,16 @@ date_shift() {
     date -j -v"${_n}d" "$_f" 2>/dev/null || date -d "$_n days" "$_f" 2>/dev/null
   else
     date -j -v"${_n}d" -f "%Y-%m-%d" "$_b" "$_f" 2>/dev/null || date -d "$_b $_n days" "$_f" 2>/dev/null
-  fi
+  fi || {
+    # BSD and GNU date have both refused it, and their errors were swallowed
+    # because the first form always fails on the other platform. Say what was
+    # rejected: under `set -e` this is otherwise a caller that dies with no
+    # output at all, which is what `--since 2026-09-01` (days, not a date)
+    # looked like from a pipeline log. A caller with its own fallback keeps
+    # silencing this the way it already silences the probes.
+    echo "date_shift: cannot shift ${_b:-today} by '$_n' days" >&2
+    return 1
+  }
 }
 
 # Whole days from <from> to <to>, both YYYY-MM-DD. Negative when <to> is
