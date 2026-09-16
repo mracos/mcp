@@ -12,6 +12,25 @@ ensure_file() {
   [[ -f "$MCP_FILE" ]] || echo '{}' > "$MCP_FILE"
 }
 
+# The real path behind a destination, following symlinks by hand because
+# macOS has no `readlink -f`. Writers must stage and rename against this, not
+# against the link: `mv` renames over the link itself, which detaches a config
+# that was symlinked in from a dotfiles repo. Every later write then lands in
+# $HOME while the repo copy goes stale and nothing reports it.
+resolve_link() {
+  local path="$1" target
+
+  while [[ -L "$path" ]]; do
+    target="$(readlink "$path")"
+    case "$target" in
+      /*) path="$target" ;;
+      *) path="${path%/*}/$target" ;;
+    esac
+  done
+
+  printf '%s\n' "$path"
+}
+
 extract_codex_managed_block() {
   [[ -f "$CODEX_CONFIG" ]] || return 0
   awk -v begin="$CODEX_MCP_BEGIN" -v end="$CODEX_MCP_END" '
@@ -115,16 +134,26 @@ sync_codex_config() {
   mkdir -p "$codex_dir"
   [[ -f "$CODEX_CONFIG" ]] || touch "$CODEX_CONFIG"
 
-  local tmp existing managed
-  tmp="${CODEX_CONFIG}.tmp"
-  existing="${CODEX_CONFIG}.clean"
-  managed="${CODEX_CONFIG}.managed"
+  # Stage beside the resolved file so the rename stays atomic and the link,
+  # if there is one, survives.
+  local target
+  target="$(resolve_link "$CODEX_CONFIG")"
 
+  local tmp existing managed
+  tmp="${target}.tmp"
+  existing="${target}.clean"
+  managed="${target}.managed"
+
+  # Also drops the blank lines the previous managed block left behind. Without
+  # that the separator below is re-added every run and the file grows two
+  # blank lines per apply.
   awk -v begin="$CODEX_MCP_BEGIN" -v end="$CODEX_MCP_END" '
     $0 == begin {skip=1; next}
     $0 == end {skip=0; next}
-    skip == 0 {print}
-  ' "$CODEX_CONFIG" > "$existing"
+    skip == 1 {next}
+    {lines[++count] = $0; if (NF) last = count}
+    END {for (i = 1; i <= last; i++) print lines[i]}
+  ' "$target" > "$existing"
 
   build_codex_mcp_block > "$managed"
 
@@ -136,7 +165,7 @@ sync_codex_config() {
     echo
   } > "$tmp"
 
-  mv "$tmp" "$CODEX_CONFIG"
+  mv "$tmp" "$target"
   rm -f "$existing" "$managed"
 }
 

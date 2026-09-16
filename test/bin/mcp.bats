@@ -995,3 +995,57 @@ EOF
   assert_failure
   assert_output --partial "unknown MCP_BACKEND='bogus'"
 }
+
+@test "mcp apply writes through a symlinked codex config, not over the link" {
+  cat > "$MCP_FILE" << 'EOF2'
+{"mytool": {"type": "http", "url": "https://example.test/mcp"}}
+EOF2
+  echo '{}' > "$HOME/.claude.json"
+
+  # A config stowed in from a dotfiles repo: the home path is a link.
+  repo="$TEST_HOME/repo"
+  mkdir -p "$repo" "$TEST_HOME/.codex"
+  printf 'model = "gpt-5"\n' > "$repo/config.toml"
+  ln -s "$repo/config.toml" "$CODEX_CONFIG"
+
+  run "$MCP_CLI" apply
+  assert_success
+
+  assert [ -L "$CODEX_CONFIG" ]
+  assert [ -n "$(grep -F '[mcp_servers.mytool]' "$repo/config.toml")" ]
+  assert [ -n "$(grep -F 'model = "gpt-5"' "$repo/config.toml")" ]
+}
+
+@test "mcp apply writes through a symlinked claude.json, not over the link" {
+  echo '{"mytool": {"type": "http", "url": "https://example.test/mcp"}}' > "$MCP_FILE"
+
+  repo="$TEST_HOME/repo"
+  mkdir -p "$repo"
+  echo '{"theme": "dark"}' > "$repo/claude.json"
+  ln -s "$repo/claude.json" "$HOME/.claude.json"
+
+  run "$MCP_CLI" apply
+  assert_success
+
+  assert [ -L "$HOME/.claude.json" ]
+  assert_equal "$(jq -r '.mcpServers.mytool.url' "$repo/claude.json")" "https://example.test/mcp"
+  assert_equal "$(jq -r '.theme' "$repo/claude.json")" "dark"
+}
+
+@test "repeated applies do not grow the codex config with blank lines" {
+  echo '{"mytool": {"type": "http", "url": "https://example.test/mcp"}}' > "$MCP_FILE"
+  echo '{}' > "$HOME/.claude.json"
+  mkdir -p "$TEST_HOME/.codex"
+  printf 'model = "gpt-5"\n' > "$CODEX_CONFIG"
+
+  run "$MCP_CLI" apply
+  assert_success
+  first=$(wc -l < "$CODEX_CONFIG")
+
+  run "$MCP_CLI" apply
+  assert_success
+  run "$MCP_CLI" apply
+  assert_success
+
+  assert_equal "$(wc -l < "$CODEX_CONFIG")" "$first"
+}

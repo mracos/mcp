@@ -66,8 +66,9 @@ while IFS= read -r server; do
 done < <(jq -r 'keys[]' "$MCP_FILE")
 
 # Merge into claude.json (use + not * to fully replace mcpServers)
-jq --argjson servers "$final_config" '. + {mcpServers: $servers}' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp"
-mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+claude_json_target="$(resolve_link "$CLAUDE_JSON")"
+jq --argjson servers "$final_config" '. + {mcpServers: $servers}' "$CLAUDE_JSON" > "${claude_json_target}.tmp"
+mv "${claude_json_target}.tmp" "$claude_json_target"
 sync_codex_config
 
 echo
